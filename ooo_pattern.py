@@ -28,21 +28,26 @@ import shutil
 #FINACK,SYN,SYNACK - the recepient must add 1 to TCP ack upon receipt of special flags
 special_flags = ["0x0011","0x0002","0x0012"]
 
+capinfos_exe = 'capinfos'
+tshark_exe = 'tshark'
+editcap_exe = 'editcap'
+mergecap_exe = 'mergecap'
+
 #Try to rearrange but don't actually split and merge the pcap file
 #for the purposes of testing, starting_index allows to skip the given number of ooo frames 
 def rearrange(cut=False, starting_index = 0):
     # -M is needed to prevent displaying rounded frame count like 24k instead of 24350
-    last_frame_no = subprocess.check_output(['capinfos','-c', '-M', capture_file]).strip().split()[-1]
+    last_frame_no = subprocess.check_output([capinfos_exe,'-c', '-M', capture_file]).strip().split()[-1]
 
-    ooo_frames_str = subprocess.check_output(['tshark', '-r', capture_file, '-Y', 'tcp.analysis.out_of_order', '-T', 'fields', '-e', 'frame.number'])
+    ooo_frames_str = subprocess.check_output([tshark_exe, '-r', capture_file, '-Y', 'tcp.analysis.out_of_order', '-T', 'fields', '-e', 'frame.number'])
     ooo_frames_str = ooo_frames_str.strip()
     ooo_frames = ooo_frames_str.split('\n')
     
-    lost_frames_str = subprocess.check_output(['tshark', '-r', capture_file, '-Y', 'tcp.analysis.lost_segment', '-T', 'fields', '-e', 'frame.number'])
+    lost_frames_str = subprocess.check_output([tshark_exe, '-r', capture_file, '-Y', 'tcp.analysis.lost_segment', '-T', 'fields', '-e', 'frame.number'])
     lost_frames_str = lost_frames_str.strip()
     lost_frames = lost_frames_str.split('\n')
     
-    retr_frames_str = subprocess.check_output(['tshark', '-r', capture_file, '-Y', 'tcp.analysis.retransmission', '-T', 'fields', '-e', 'frame.number'])
+    retr_frames_str = subprocess.check_output([tshark_exe, '-r', capture_file, '-Y', 'tcp.analysis.retransmission', '-T', 'fields', '-e', 'frame.number'])
     retr_frames_str = retr_frames_str.strip()
     retr_frames = retr_frames_str.split('\n')
     
@@ -58,10 +63,10 @@ def rearrange(cut=False, starting_index = 0):
         
         #make sure that all the 7 packets belong to the same stream, ie they are not two streams intermingled    
         #get the frame's tcp.stream
-        stream = subprocess.check_output(['tshark', '-r', capture_file, '-Y', 'frame.number=='+frame, '-T', 'fields', '-e', 'tcp.stream'])
+        stream = subprocess.check_output([tshark_exe, '-r', capture_file, '-Y', 'frame.number=='+frame, '-T', 'fields', '-e', 'tcp.stream'])
         stream = stream.strip()
         #get all frames of the stream
-        frames_str = subprocess.check_output(['tshark', '-r', capture_file, '-Y', 'tcp.stream=='+stream, '-T', 'fields', '-e', 'frame.number'])
+        frames_str = subprocess.check_output([tshark_exe, '-r', capture_file, '-Y', 'tcp.stream=='+stream, '-T', 'fields', '-e', 'frame.number'])
         frames_str = frames_str.strip()
         frames_in_stream = frames_str.split('\n')
         #get the ooo frame's index
@@ -89,7 +94,7 @@ def rearrange(cut=False, starting_index = 0):
         #now do the actual rearranging
         
         #query useful data for the 3 frames that need to be rearranged plus the two encompassing frames
-        return_string = subprocess.check_output(['tshark', '-r', capture_file, '-Y', 'frame.number=='+frames_in_stream[ooo_index-3]+' or frame.number=='+frames_in_stream[ooo_index-2]+' or frame.number=='+frames_in_stream[ooo_index-1]+' or frame.number=='+frames_in_stream[ooo_index]+' or frame.number=='+frames_in_stream[ooo_index+1], '-T', 'fields', '-e', 'frame.number', '-e', 'tcp.flags', '-e', 'ip.src', '-e', 'tcp.ack', '-e', 'tcp.seq', '-e', 'tcp.len'])
+        return_string = subprocess.check_output([tshark_exe, '-r', capture_file, '-Y', 'frame.number=='+frames_in_stream[ooo_index-3]+' or frame.number=='+frames_in_stream[ooo_index-2]+' or frame.number=='+frames_in_stream[ooo_index-1]+' or frame.number=='+frames_in_stream[ooo_index]+' or frame.number=='+frames_in_stream[ooo_index+1], '-T', 'fields', '-e', 'frame.number', '-e', 'tcp.flags', '-e', 'ip.src', '-e', 'tcp.ack', '-e', 'tcp.seq', '-e', 'tcp.len'])
         return_string = return_string.rstrip()
         frames = return_string.split('\n')
         five_frames = []
@@ -121,7 +126,7 @@ def rearrange(cut=False, starting_index = 0):
                         success = True
                         break
             if success == False:
-                retval = subprocess.check_output(['tshark', '-r', capture_file, '-Y', 'frame.number=='+five_frames[-1]['frame_number'], '-T', 'fields', '-e', 'tcp.analysis.duplicate_ack'])
+                retval = subprocess.check_output([tshark_exe, '-r', capture_file, '-Y', 'frame.number=='+five_frames[-1]['frame_number'], '-T', 'fields', '-e', 'tcp.analysis.duplicate_ack'])
                 retval = retval.strip()
                 if retval == '1':
                     #expected behaviour, don't treat as an error
@@ -166,17 +171,17 @@ def rearrange(cut=False, starting_index = 0):
         
             #save all out-of-order frames for future merging (the name of file corresponds to frame number)
             for frame in found_frames:
-                subprocess.call(['editcap', new_capture_file, os.path.join(workdir,frame['frame_number']), '-r', frame['frame_number']], stdout=open(os.devnull,'w'))
+                subprocess.call([editcap_exe, new_capture_file, os.path.join(workdir,frame['frame_number']), '-r', frame['frame_number']], stdout=open(os.devnull,'w'))
                 
             #split into 2 large parts omitting the ooo frames
-            subprocess.call(['editcap', new_capture_file, os.path.join(workdir,'part1'), '-r', '0-'+five_frames[0]['frame_number']], stdout=open(os.devnull,'w'))
-            subprocess.call(['editcap', new_capture_file, os.path.join(workdir,'part2'), '-r', five_frames[4]['frame_number']+'-'+last_frame_no], stdout=open(os.devnull,'w'))
+            subprocess.call([editcap_exe, new_capture_file, os.path.join(workdir,'part1'), '-r', '0-'+five_frames[0]['frame_number']], stdout=open(os.devnull,'w'))
+            subprocess.call([editcap_exe, new_capture_file, os.path.join(workdir,'part2'), '-r', five_frames[4]['frame_number']+'-'+last_frame_no], stdout=open(os.devnull,'w'))
             #merge in the correct order
-            subprocess.call(['mergecap', '-a', '-w', new_capture_file, os.path.join(workdir,'part1'), os.path.join(workdir,found_frames[0]['frame_number']), os.path.join(workdir,found_frames[1]['frame_number']), os.path.join(workdir,found_frames[2]['frame_number']), os.path.join(workdir,'part2')], stdout=open(os.devnull,'w'))
+            subprocess.call([mergecap_exe, '-a', '-w', new_capture_file, os.path.join(workdir,'part1'), os.path.join(workdir,found_frames[0]['frame_number']), os.path.join(workdir,found_frames[1]['frame_number']), os.path.join(workdir,found_frames[2]['frame_number']), os.path.join(workdir,'part2')], stdout=open(os.devnull,'w'))
             for frame in found_frames:
                 os.remove(frame['frame_number'])                
             #for debugging
-            new_last_frame_no = subprocess.check_output(['capinfos','-c', '-M', new_capture_file]).strip().split()[-1]
+            new_last_frame_no = subprocess.check_output([capinfos_exe,'-c', '-M', new_capture_file]).strip().split()[-1]
             if int(new_last_frame_no) != int(last_frame_no):
                 raise ('Frame number mismatch') 
             os.remove(os.path.join(workdir,'part1'))
