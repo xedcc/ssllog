@@ -22,16 +22,24 @@
 
 import subprocess
 import os
+import platform
 import sys
 import shutil
 
 #FINACK,SYN,SYNACK - the recepient must add 1 to TCP ack upon receipt of special flags
 special_flags = ["0x0011","0x0002","0x0012"]
 
-capinfos_exe = 'capinfos'
-tshark_exe = 'tshark'
-editcap_exe = 'editcap'
-mergecap_exe = 'mergecap'
+OS = platform.system()
+if OS == 'Linux':
+    capinfos_exe = 'capinfos'
+    tshark_exe = 'tshark'
+    editcap_exe = 'editcap'
+    mergecap_exe = 'mergecap'
+elif OS == 'Windows':
+    capinfos_exe = 'C:\\Program Files\\Wireshark\\capinfos.exe'
+    tshark_exe = 'C:\\Program Files\\Wireshark\\tshark.exe'
+    editcap_exe = 'C:\\Program Files\\Wireshark\\editcap.exe'
+    mergecap_exe = 'C:\\Program Files\\Wireshark\\mergecap.exe'
 
 #Try to rearrange but don't actually split and merge the pcap file
 #for the purposes of testing, starting_index allows to skip the given number of ooo frames 
@@ -41,16 +49,25 @@ def rearrange(cut=False, starting_index = 0):
 
     ooo_frames_str = subprocess.check_output([tshark_exe, '-r', capture_file, '-Y', 'tcp.analysis.out_of_order', '-T', 'fields', '-e', 'frame.number'])
     ooo_frames_str = ooo_frames_str.strip()
-    ooo_frames = ooo_frames_str.split('\n')
-    
+    if OS == 'Linux':
+        ooo_frames = ooo_frames_str.split('\n')
+    if OS == 'Windows':
+        ooo_frames = ooo_frames_str.split('\r\n')
+        
     lost_frames_str = subprocess.check_output([tshark_exe, '-r', capture_file, '-Y', 'tcp.analysis.lost_segment', '-T', 'fields', '-e', 'frame.number'])
     lost_frames_str = lost_frames_str.strip()
-    lost_frames = lost_frames_str.split('\n')
-    
+    if OS == 'Linux':
+        lost_frames = lost_frames_str.split('\n')
+    if OS == 'Windows':
+        lost_frames = lost_frames_str.split('\r\n')
+        
     retr_frames_str = subprocess.check_output([tshark_exe, '-r', capture_file, '-Y', 'tcp.analysis.retransmission', '-T', 'fields', '-e', 'frame.number'])
     retr_frames_str = retr_frames_str.strip()
-    retr_frames = retr_frames_str.split('\n')
-    
+    if OS == 'Linux':
+        retr_frames = retr_frames_str.split('\n')
+    if OS == 'Windows':
+        retr_frames = retr_frames_str.split('\r\n')
+
     print 'Total ooo frames '+ str(len(ooo_frames))
     rearrange_unknown_error_count = 0
     rearrange_expected_error_count = 0
@@ -68,7 +85,11 @@ def rearrange(cut=False, starting_index = 0):
         #get all frames of the stream
         frames_str = subprocess.check_output([tshark_exe, '-r', capture_file, '-Y', 'tcp.stream=='+stream, '-T', 'fields', '-e', 'frame.number'])
         frames_str = frames_str.strip()
-        frames_in_stream = frames_str.split('\n')
+        if OS == 'Linux':
+            frames_in_stream = frames_str.split('\n')
+        if OS == 'Windows':
+            frames_in_stream = frames_str.split('\r\n')
+
         #get the ooo frame's index
         ooo_index = frames_in_stream.index(frame)
         
@@ -96,7 +117,11 @@ def rearrange(cut=False, starting_index = 0):
         #query useful data for the 3 frames that need to be rearranged plus the two encompassing frames
         return_string = subprocess.check_output([tshark_exe, '-r', capture_file, '-Y', 'frame.number=='+frames_in_stream[ooo_index-3]+' or frame.number=='+frames_in_stream[ooo_index-2]+' or frame.number=='+frames_in_stream[ooo_index-1]+' or frame.number=='+frames_in_stream[ooo_index]+' or frame.number=='+frames_in_stream[ooo_index+1], '-T', 'fields', '-e', 'frame.number', '-e', 'tcp.flags', '-e', 'ip.src', '-e', 'tcp.ack', '-e', 'tcp.seq', '-e', 'tcp.len'])
         return_string = return_string.rstrip()
-        frames = return_string.split('\n')
+        if OS == 'Linux':
+            frames = return_string.split('\n')
+        if OS == 'Windows':
+            frames = return_string.split('\r\n')
+
         five_frames = []
         for frame in frames:
             frame_number, tcp_flags, ip_src, tcp_ack, tcp_seq, tcp_len = frame.split('\t')
