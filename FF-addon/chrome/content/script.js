@@ -8,8 +8,11 @@ var tempdir = "";
 var is_tempdir_received = false;
 var reqTempDir;
 
+//main ()
 function startSSLSession(){
   getTempDir();
+  setSSLPrefs();
+  setProxyPrefs();
   waitForResponse(0);
 //After backend responds, continue_after_tempdir_received() is called from within waitForResponse()
 }
@@ -53,19 +56,12 @@ function waitForResponse(iteration) {
 }
 
 function continue_after_tempdir_received() {
-	download_prefs = prefs.getBranch("browser.download.");
-	var pref_dir = "";
-	var pref_folderList;
-	try {
-		pref_dir = download_prefs.getCharPref("dir");
-		pref_folderList = download_prefs.getIntPref("folderList");
-	}
-	//getCharPref("dir") throws a benign exception if it's never been used and dir.length == 0
-	catch (e){
-	  if (pref_dir.length != 0) throw "Unknown exception on get*Pref"
-	}
-	download_prefs.setIntPref("folderList", 2); //folderList==2 => use custom folder for downloads
-	download_prefs.setCharPref("dir",tempdir);  // custom folder to use	
+	viewsource_prefs = prefs.getBranch("view_source.editor.");
+//FF will first write the source file into a "TMP" env.var. and then try to invoke "path" on it
+//We only need it to write the source file into a TMP dir and silently fail to invoke a "path" program 
+	viewsource_prefs.setBoolPref("external", true); 
+//any existing dummyfile will make FF silently fail to open the source viewer 
+	viewsource_prefs.setCharPref("path",tempdir);
 }
 
 function stopSSLSession(){
@@ -98,34 +94,52 @@ function sendStatus () {
   oReqPost.send()
 }
 
-ssl_prefs = prefs.getBranch("security.ssl3.");
-ssl_prefs.setBoolPref("dhe_dss_aes_128_sha",false);
-ssl_prefs.setBoolPref("dhe_dss_aes_256_sha",false);
-ssl_prefs.setBoolPref("dhe_dss_camellia_128_sha",false);
-ssl_prefs.setBoolPref("dhe_dss_camellia_256_sha",false);
-ssl_prefs.setBoolPref("dhe_dss_des_ede3_sha",false);
-ssl_prefs.setBoolPref("dhe_rsa_aes_128_sha",false);
-ssl_prefs.setBoolPref("dhe_rsa_aes_256_sha",false);
-ssl_prefs.setBoolPref("dhe_rsa_camellia_128_sha",false);
-ssl_prefs.setBoolPref("dhe_rsa_camellia_256_sha",false);
-ssl_prefs.setBoolPref("dhe_rsa_des_ede3_sha",false);
-ssl_prefs.setBoolPref("ecdh_ecdsa_aes_128_sha",false);
-ssl_prefs.setBoolPref("ecdh_ecdsa_aes_256_sha",false);
-ssl_prefs.setBoolPref("ecdh_ecdsa_des_ede3_sha",false);
-ssl_prefs.setBoolPref("ecdh_ecdsa_rc4_128_sha",false);
-ssl_prefs.setBoolPref("ecdh_rsa_aes_128_sha",false);
-ssl_prefs.setBoolPref("ecdh_rsa_aes_256_sha",false);
-ssl_prefs.setBoolPref("ecdh_rsa_des_ede3_sha",false);
-ssl_prefs.setBoolPref("ecdh_rsa_rc4_128_sha",false);
-ssl_prefs.setBoolPref("ecdhe_ecdsa_aes_128_sha",false);
-ssl_prefs.setBoolPref("ecdhe_ecdsa_aes_256_sha",false);
-ssl_prefs.setBoolPref("ecdhe_ecdsa_des_ede3_sha",false);
-ssl_prefs.setBoolPref("ecdhe_ecdsa_rc4_128_sha",false);
-ssl_prefs.setBoolPref("ecdhe_rsa_aes_128_sha",false);
-ssl_prefs.setBoolPref("ecdhe_rsa_aes_256_sha",false);
-ssl_prefs.setBoolPref("ecdhe_rsa_des_ede3_sha",false);
-ssl_prefs.setBoolPref("ecdhe_rsa_rc4_128_sha",false);
+function setSSLPrefs() {
+	ssl_prefs = prefs.getBranch("security.ssl3.");
+	ssl_prefs.setBoolPref("dhe_dss_aes_128_sha",false);
+	ssl_prefs.setBoolPref("dhe_dss_aes_256_sha",false);
+	ssl_prefs.setBoolPref("dhe_dss_camellia_128_sha",false);
+	ssl_prefs.setBoolPref("dhe_dss_camellia_256_sha",false);
+	ssl_prefs.setBoolPref("dhe_dss_des_ede3_sha",false);
+	ssl_prefs.setBoolPref("dhe_rsa_aes_128_sha",false);
+	ssl_prefs.setBoolPref("dhe_rsa_aes_256_sha",false);
+	ssl_prefs.setBoolPref("dhe_rsa_camellia_128_sha",false);
+	ssl_prefs.setBoolPref("dhe_rsa_camellia_256_sha",false);
+	ssl_prefs.setBoolPref("dhe_rsa_des_ede3_sha",false);
+	ssl_prefs.setBoolPref("ecdh_ecdsa_aes_128_sha",false);
+	ssl_prefs.setBoolPref("ecdh_ecdsa_aes_256_sha",false);
+	ssl_prefs.setBoolPref("ecdh_ecdsa_des_ede3_sha",false);
+	ssl_prefs.setBoolPref("ecdh_ecdsa_rc4_128_sha",false);
+	ssl_prefs.setBoolPref("ecdh_rsa_aes_128_sha",false);
+	ssl_prefs.setBoolPref("ecdh_rsa_aes_256_sha",false);
+	ssl_prefs.setBoolPref("ecdh_rsa_des_ede3_sha",false);
+	ssl_prefs.setBoolPref("ecdh_rsa_rc4_128_sha",false);
+	ssl_prefs.setBoolPref("ecdhe_ecdsa_aes_128_sha",false);
+	ssl_prefs.setBoolPref("ecdhe_ecdsa_aes_256_sha",false);
+	ssl_prefs.setBoolPref("ecdhe_ecdsa_des_ede3_sha",false);
+	ssl_prefs.setBoolPref("ecdhe_ecdsa_rc4_128_sha",false);
+	ssl_prefs.setBoolPref("ecdhe_rsa_aes_128_sha",false);
+	ssl_prefs.setBoolPref("ecdhe_rsa_aes_256_sha",false);
+	ssl_prefs.setBoolPref("ecdhe_rsa_des_ede3_sha",false);
+	ssl_prefs.setBoolPref("ecdhe_rsa_rc4_128_sha",false);
 
-security_prefs = prefs.getBranch("security.");
-security_prefs.setBoolPref("security.enable_tls_session_tickets",false);
+	security_prefs = prefs.getBranch("security.");
+	security_prefs.setBoolPref("enable_tls_session_tickets",false);
+	
+	spdy_prefs = prefs.getBranch("network.http.spdy.");
+	spdy_prefs.setBoolPref("enabled",false);
+	spdy_prefs.setBoolPref("enabled.v2",false);
+	spdy_prefs.setBoolPref("enabled.v3",false);
 
+
+
+}
+
+function setProxyPrefs(){
+	proxy_prefs = prefs.getBranch("network.proxy.");
+	proxy_prefs.setIntPref("type", 1)
+	proxy_prefs.setCharPref("http","127.0.0.1")
+	proxy_prefs.setIntPref("http_port", 8080)
+	proxy_prefs.setCharPref("ssl","127.0.0.1")
+	proxy_prefs.setIntPref("ssl_port", 8080)
+}
