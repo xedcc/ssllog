@@ -25,8 +25,6 @@ escrow_port = 12345
 #an existing username and password used to connect to sshd on escrow's server. For testing you can give your username if sshd ir run locally
 escrow_ssh_user = 'default' #e.g. 'ssllog_user' 
 escrow_ssh_pass = 'VqQ7ccyKcZCRq'
-#THIS ADDRESS MUST BE in the seller's bitcond wallet
-seller_addr_funded_multisig = '1CTCSBXFFCUHbzi19WJam2fkzNTGMYBAuF' #e.g. '19CzQYZGiaENfypuNzMAf3Mg4vs5oE1hgV'
 
 #ssllog_installdir is the dir from which main.py is run
 currfile = inspect.getfile(inspect.currentframe())
@@ -350,22 +348,34 @@ def seller_get_certificate_verify_message():
             else:
                 print ('Failed to connect to bitcoind on try '+ str(i+1) +'of4. Sleeping 5 sec.',end='\r\n')
                 time.sleep(5)
+    #Since the datadir has just been created, we need to create a new address to sign with
+    #This is only done in the testing mode
+    #In real-life though, the address would have already been created and used to perform the 2-of-3 transaction
     try:
-        signature = seller_bitcoin_rpc.signmessage(seller_addr_funded_multisig, certificate)
+        seller_btc_address = seller_bitcoin_rpc.getaccountaddress('seller')
+    except Exception, e:
+        print ("Error while invoking getaccountaddress", e,end='\r\n')
+        cleanup_and_exit()
+    try:
+        signature = seller_bitcoin_rpc.signmessage(seller_btc_address, certificate)
     except Exception, e:
         print ("Error while invoking signmessage. Did you indicate a valid BTC address?", e,end='\r\n')
         cleanup_and_exit()
-    return signature + ';' + certificate
-    
+    return signature + ';' + certificate + ':' + seller_btc_address    
 
 def seller_start_bitcoind_stunnel_sshpass_dumpcap_squid(skip_capture):
     global pids
     
     if skip_capture == False:
         print ("Starting bitcoind in offline mode. No part of blockchain will be downloaded",end='\r\n')
+        if os.path.isdir(os.path.join(installdir, 'bitcoind')) == False:
+            os.makedirs(os.path.join(installdir, 'bitcoind'))
+        if os.path.isdir(os.path.join(installdir, 'bitcoind', 'datadir_seller')) == False:
+            os.makedirs(os.path.join(installdir, 'bitcoind', 'datadir_seller'))
+           
         try:
            #start bitcoind in offline mode
-           bitcoind_proc = subprocess.Popen([bitcoind_exepath, '-datadir=' + os.path.join(installdir, 'bitcoind', "empty_bitcoin_datadir_seller"), '-maxconnections=0', '-server', '-listen=0', '-rpcuser=ssllog_user', '-rpcpassword=ssllog_pswd', '-rpcport=8339'], stdout=open(os.path.join(installdir, 'bitcoind', "bitcoind_seller.stdout"),'w'), stderr=open(os.path.join(installdir, 'bitcoind', "bitcoind_seller.stderr"),'w'))
+           bitcoind_proc = subprocess.Popen([bitcoind_exepath, '-datadir=' + os.path.join(installdir, 'bitcoind', "datadir_seller"), '-maxconnections=0', '-server', '-listen=0', '-rpcuser=ssllog_user', '-rpcpassword=ssllog_pswd', '-rpcport=8339'], stdout=open(os.path.join(installdir, 'bitcoind', "bitcoind_seller.stdout"),'w'), stderr=open(os.path.join(installdir, 'bitcoind', "bitcoind_seller.stderr"),'w'))
         except:
             print ('Exception starting bitcoind',end='\r\n')
             cleanup_and_exit()
@@ -423,11 +433,12 @@ def buyer_get_and_verify_seller_cert():
     base64_message = response.headers['value']
     message = base64.b64decode(base64_message)
     signature = message[:message.find(";")]
-    certificate = message[message.find(";")+1:]
+    certificate = message[message.find(";")+1:message.find(":")]
+    seller_btc_address = message[message.find(":")+1:]
     
     print ("Verifying seller's certificate with bitcoind",end='\r\n')
     #bitcond needs about 10 sec to initialize an empty dir when launched for the first time
-    #check if it is finished initializing and is ready for queries. Try 4 times with an interval of 5 sec
+    #check if it is finished initializing and is ready for queries. Try 4 times with an interval of 10 sec
     for i in range(4):
         try:
             buyer_bitcoin_rpc.getinfo()
@@ -436,13 +447,13 @@ def buyer_get_and_verify_seller_cert():
                 print ("Aborting.Couldn't connect to bitcoind",end='\r\n')
                 cleanup_and_exit()
             else:
-                print ('Failed to connect to bitcoind on try '+ str(i+1) +'of4. Sleeping 5 sec.',end='\r\n')
-                time.sleep(5)
+                print ('Failed to connect to bitcoind on try '+ str(i+1) +'of4. Sleeping 10 sec.',end='\r\n')
+                time.sleep(10)
         
                 
     print ("Verifying seller's certificate for stunnel",end='\r\n')
     try:
-        if buyer_bitcoin_rpc.verifymessage(seller_addr_funded_multisig, signature, certificate) != True :
+        if buyer_bitcoin_rpc.verifymessage(seller_btc_address, signature, certificate) != True :
             print ("Failed to verify seller's certificate",end='\r\n')
             cleanup_and_exit()
     except Exception,e:
@@ -462,9 +473,14 @@ def buyer_start_bitcoind_stunnel_sshpass_dumpcap(skip_capture):
     
     if skip_capture == False:
         print ('Starting bitcoind',end='\r\n')
+        if os.path.isdir(os.path.join(installdir, 'bitcoind')) == False:
+           os.makedirs(os.path.join(installdir, 'bitcoind'))
+        if os.path.isdir(os.path.join(installdir, 'bitcoind', 'datadir_buyer')) == False:
+           os.makedirs(os.path.join(installdir, 'bitcoind', 'datadir_buyer'))
+      
         try:
             #start bitcoind in offline mode
-            bitcoind_proc = subprocess.Popen([bitcoind_exepath, '-datadir=' + os.path.join(installdir, 'bitcoind', "empty_bitcoin_datadir_buyer"), '-maxconnections=0', '-server', '-listen=0', '-rpcuser=ssllog_user', '-rpcpassword=ssllog_pswd', '-rpcport=8338'], stdout=open(os.path.join(installdir, 'bitcoind', "bitcoind_buyer.stdout"),'w'), stderr=open(os.path.join(installdir, 'bitcoind', "bitcoind_buyer.stderr"),'w'))
+            bitcoind_proc = subprocess.Popen([bitcoind_exepath, '-datadir=' + os.path.join(installdir, 'bitcoind', "datadir_buyer"), '-maxconnections=0', '-server', '-listen=0', '-rpcuser=ssllog_user', '-rpcpassword=ssllog_pswd', '-rpcport=8338'], stdout=open(os.path.join(installdir, 'bitcoind', "bitcoind_buyer.stdout"),'w'), stderr=open(os.path.join(installdir, 'bitcoind', "bitcoind_buyer.stderr"),'w'))
         except:
             print ('Exception starting bitcoind',end='\r\n')
             cleanup_and_exit()
@@ -725,7 +741,7 @@ def buyer_get_sslhashes(capturefile, htmlhashes):
             print ("A very serious issue encountered. Not all SSL segments belong to the same TCP stream. Please contact the developers",end='\r\n')
             cleanup_and_exit()
             
-        print ('Extracting hex data from ' + str(len(segments)) + ' SSL segments')
+        print ('Extracting hex data from ' + str(len(segments)) + ' SSL segments',end='\r\n')
         frame_argument = 'frame.number=='+segments[0]
         for segment in sorted(segments[1:]):
             frame_argument += ' or frame.number==' + segment            
