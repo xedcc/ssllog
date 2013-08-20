@@ -6,7 +6,7 @@
     <toolbarbutton type="menu-button" id="ssl-button" label="ssl-test" image="chrome://sample/skin/icon.png">
        <menupopup>
          <menuitem label="Start SSl session" oncommand="startSSLSession()"/>
-         <menuitem label="Mark page for escrow" oncommand="saveDocument(window.content.document, true);"/>
+         <menuitem label="Mark page for escrow" oncommand="BrowserViewSourceOfDocument(content.document);"/>
          <menuitem label="End SSL session" oncommand="stopSSLSession()"/>
        </menupopup>
     </toolbarbutton>
