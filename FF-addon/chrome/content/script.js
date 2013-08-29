@@ -123,6 +123,10 @@ function setSSLPrefs() {
 	ssl_prefs.setBoolPref("ecdhe_rsa_des_ede3_sha",false);
 	ssl_prefs.setBoolPref("ecdhe_rsa_rc4_128_sha",false);
 
+//Although a non-DH cipher, wireshark wouldn'r decrypt bitcointalk.org which uses a camellia cipher
+	ssl_prefs.setBoolPref("rsa_camellia_128_sha",false);
+	ssl_prefs.setBoolPref("rsa_camellia_256_sha",false);
+
 	security_prefs = prefs.getBranch("security.");
 	security_prefs.setBoolPref("enable_tls_session_tickets",false);
 	
