@@ -879,9 +879,13 @@ def get_htmlhash_from_asciidump(ascii_dump):
         cleanup_and_exit()
         return
 
-    #We are interested in "Uncompressed entity body" in case of compressed HTML. If not present, then
-    #the very last entry of "De-chunked entity body" in case on uncompressed chunked HTML. If not present, then
-    #the very last entry of "Reassembled SSL" in case of uncompressed unchunked segmented HTML (very rare)
+    #We are interested in "Uncompressed entity body" for compressed HTML. If not present, then
+    #the very last entry of "De-chunked entity body" for no-compression no-chunks HTML. If not present, then
+    #the very last entry of "Reassembled SSL" for no-compression no-chunks HTML in multiple SSL segments (very rare),
+    #and finally, the very last entry of "Decrypted SSL data" for no-compression no-chunks HTML in a single SSL segment.
+    dechunked_pos = -1
+    reassembled_pos = -1
+    decrypted_pos = -1
     uncompr_pos = ascii_dump.rfind('Uncompressed entity body')
     if uncompr_pos != -1:
         for line in ascii_dump[uncompr_pos:].split('\n')[1:]:
@@ -890,8 +894,9 @@ def get_htmlhash_from_asciidump(ascii_dump):
                 m_array = bytearray.fromhex(line[6:54])
                 binary_html += m_array
             else:
-                break          
-    else:
+                break
+            
+    if uncompr_pos == -1:
         dechunked_pos = ascii_dump.rfind('De-chunked entity body')
         if dechunked_pos != -1:     
             for line in ascii_dump[dechunked_pos:].split('\n')[1:]:
@@ -902,50 +907,73 @@ def get_htmlhash_from_asciidump(ascii_dump):
                     binary_html += m_array
                 else:
                     break
-        else:
-            reassembled_pos = ascii_dump.rfind('Reassembled SSL')
-            if reassembled_pos != -1:     
-                #skip the HTTP header and find where the HTTP body starts
-                body_start = reassembled_pos + ascii_dump[reassembled_pos:].find('0d 0a 0d 0a')
-                if body_start == -1:
-                    print ('Could not find HTTP body',end='\r\n')
-                    cleanup_and_exit()
-                    return
-                lines = ascii_dump[body_start+len('0d 0a 0d 0a'):].split('\n')
-                #treat the first line specially
-                binary_html += bytearray.fromhex(lines[0][:-16])
-                for line in lines[1:]:
-                    #convert ascii representation of hex into binary
-                    #only deal with lines where first 4 chars are hexdigits
-                    if all(c in hexdigits for c in line [:4]):
-                        m_array = bytearray.fromhex(line[6:54])
-                        binary_html += m_array
-                    else:
-                        break
+                
+    if dechunked_pos == -1:
+        reassembled_pos = ascii_dump.rfind('Reassembled SSL')
+        if reassembled_pos != -1:     
+            #skip the HTTP header and find where the HTTP body starts
+            body_start = reassembled_pos + ascii_dump[reassembled_pos:].find('0d 0a 0d 0a')
+            if body_start == -1:
+                print ('Could not find HTTP body',end='\r\n')
+                cleanup_and_exit()
+                return
+            lines = ascii_dump[body_start+len('0d 0a 0d 0a'):].split('\n')
+            #treat the first line specially
+            binary_html += bytearray.fromhex(lines[0][:-16])
+            for line in lines[1:]:
+                #convert ascii representation of hex into binary
+                #only deal with lines where first 4 chars are hexdigits
+                if all(c in hexdigits for c in line [:4]):
+                    m_array = bytearray.fromhex(line[6:54])
+                    binary_html += m_array
+                else:
+                    break
+                
+    if reassembled_pos == -1:
+        decrypted_pos = ascii_dump.rfind('Decrypted SSL data')
+        if decrypted_pos != -1:     
+            #skip the HTTP header and find where the HTTP body starts
+            body_start = decrypted_pos + ascii_dump[decrypted_pos:].find('0d 0a 0d 0a')
+            if body_start == -1:
+                print ('Could not find HTTP body',end='\r\n')
+                cleanup_and_exit()
+                return
+            lines = ascii_dump[body_start+len('0d 0a 0d 0a'):].split('\n')
+            #treat the first line specially
+            binary_html += bytearray.fromhex(lines[0][:-16])
+            for line in lines[1:]:
+                #convert ascii representation of hex into binary
+                #only deal with lines where first 4 chars are hexdigits
+                if all(c in hexdigits for c in line [:4]):
+                    m_array = bytearray.fromhex(line[6:54])
+                    binary_html += m_array
+                else:
+                    break
+                    
+    else:
+        #example.org's response going through squid ends up as ungzipped, unchunked HTML
+        page_end = ascii_dump.rfind('.\n\n')
+        if page_end == -1:
+            print ("Could not find page's end",end='\r\n')
+            return 0
+        page_start = ascii_dump.rfind('0d 0a 0d 0a')
+        if page_start == -1:
+            print ("Could not find page's start",end='\r\n')
+            return 0
+        if page_end < page_start:
+            print ("Could not find HTML page",end='\r\n')
+            return 0
+        lines = ascii_dump[page_start+len('0d 0a 0d 0a'):page_end+len('.\n\n')].split('\n')
+        #treat the first line specially
+        binary_html += bytearray.fromhex(lines[0][:-16])
+        for line in lines[1:]:
+            #convert ascii representation of hex into binary
+            #only deal with lines where first 4 chars are hexdigits
+            if all(c in hexdigits for c in line [:4]):
+                m_array = bytearray.fromhex(line[6:54])
+                binary_html += m_array
             else:
-                #example.org's response going through squid ends up as ungzipped, unchunked HTML
-                page_end = ascii_dump.rfind('.\n\n')
-                if page_end == -1:
-                    print ("Could not find page's end",end='\r\n')
-                    return 0
-                page_start = ascii_dump.rfind('0d 0a 0d 0a')
-                if page_start == -1:
-                    print ("Could not find page's start",end='\r\n')
-                    return 0
-                if page_end < page_start:
-                    print ("Could not find HTML page",end='\r\n')
-                    return 0
-                lines = ascii_dump[page_start+len('0d 0a 0d 0a'):page_end+len('.\n\n')].split('\n')
-                #treat the first line specially
-                binary_html += bytearray.fromhex(lines[0][:-16])
-                for line in lines[1:]:
-                    #convert ascii representation of hex into binary
-                    #only deal with lines where first 4 chars are hexdigits
-                    if all(c in hexdigits for c in line [:4]):
-                        m_array = bytearray.fromhex(line[6:54])
-                        binary_html += m_array
-                    else:
-                        break    
+                break    
                    
     if len(binary_html) == 0:
         print ('empty binary array',end='\r\n')
