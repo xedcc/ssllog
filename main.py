@@ -19,16 +19,27 @@ from bitcoinrpc import authproxy
 #--------------------Begin customizable variables-------------------------------------
 
 #THIS MUST BE CHANGED to point to a escrow's server IP which is running sshd. You can use localhost for testing
-escrow_host = 'localhost' #e.g. '1.2.3.4'  NB! '127.0.0.1' may not work, use localhost instead
+escrow_host = '' #e.g. '1.2.3.4'  NB! '127.0.0.1' may not work, use localhost instead
 #the port is an arbtrary port on the escrow's server. Unless there is a port conflict, no need to change it.
-escrow_port = 12345
+escrow_random_port = 0
 #an existing username and password used to connect to sshd on escrow's server. For testing you can give your username if sshd ir run locally
-escrow_ssh_user = 'default' #e.g. 'ssllog_user' 
-escrow_ssh_pass = 'VqQ7ccyKcZCRq'
+escrow_ssh_user = 'username' #e.g. 'ssllog_user' 
+escrow_ssh_pass = 'password'
+escrow_ssh_port = 22
 
 #ssllog_installdir is the dir from which main.py is run
 currfile = inspect.getfile(inspect.currentframe())
 installdir = os.path.dirname(os.path.realpath(__file__))
+
+#read some preferences from an external file
+if os.path.isfile(os.path.join(installdir,'preferences.py')):
+    sys.path.append(installdir)
+    import preferences
+    escrow_host = preferences.escrow_host
+    escrow_random_port = preferences.escrow_random_port
+    escrow_ssh_user = preferences.escrow_ssh_user
+    escrow_ssh_pass = preferences.escrow_ssh_pass
+    escrow_ssh_port = preferences.escrow_ssh_port
 
 #---------------------You can modify these paths if some programs are not in your $PATH------------------
 #DONT USE the version of stunnel that comes with Ubuntu - it is a ridiculously old incompatible version
@@ -200,9 +211,17 @@ def buyer_start_stunnel_with_certificate(skip_capture):
 def send_logs_to_escrow(ssl_hashes):
     print ("Findind SSL segments in captured traffic",end='\r\n')
     if len(ssl_hashes) < 1:
-        print ('zero hashes provided',end='\r\n')
+        print ('No SSL hashes provided',end='\r\n')
         cleanup_and_exit()
-    frames_wanted = []
+        
+    hashes_to_keep = ssl_hashes[:]
+    hashes_to_remove = []
+    post_hashes_present = False
+    if ssl_hashes.count('POST') == 1:
+        post_hashes_present = True
+        hashes_to_remove = ssl_hashes[ssl_hashes.index('POST')+1:]
+        hashes_to_keep = ssl_hashes[:ssl_hashes.index('POST')]
+           
     #we're only concerned with SSL frames which don't contain handshakes but application data
     try:
         frames_str = subprocess.check_output([tshark_exepath, '-r', seller_dumpcap_capture_file, '-Y', 'ssl.app_data', '-T', 'fields', '-e', 'frame.number'])
@@ -224,33 +243,32 @@ def send_logs_to_escrow(ssl_hashes):
         print ('Mismatch in number of frames and application data items',end='\r\n')
         cleanup_and_exit()
       
-    break_out = False  
+    break_out = False
+    frames_to_keep = []    
     for index,appdata in enumerate(app_data):
-        print ('Processing frame ' + str(index+1) + ' out of total ' + str(len(ssl_frames)))        
+        print ('Processing frame ' + str(index+1) + ' out of total ' + str(len(ssl_frames)),end='\r\n')        
         #(ssl.app_data comma-delimits multiple SSL segments within the same frame)
         segments = appdata.split(',')
         
         for one_segment in segments:
             one_segment = one_segment.replace(':',' ')
             ssl_md5 = hashlib.md5(bytearray.fromhex(one_segment)).hexdigest()
-            if ssl_md5 in ssl_hashes:
+            if ssl_md5 in hashes_to_keep:
                 print ("found hash", ssl_md5)
-                frames_wanted.append(ssl_frames[index])
-                if len(frames_wanted) == len(ssl_hashes):
+                frames_to_keep.append(ssl_frames[index])
+                if len(frames_to_keep) == len(hashes_to_keep):
                     break_out = True
-                    break
-                
+                    break            
         if break_out == True:
             break
             
-    if len (frames_wanted) < 1:
-        print ("Couldn't find all SSL frames with given hashes. Frames found:"+str(len(frames_wanted))+" out of:"+str(len(ssl_hashes)),end='\r\n')
+    if len (frames_to_keep) != len(hashes_to_keep):
+        print ("Couldn't find all SSL frames with given hashes. Frames found:"+str(len(frames_to_keep))+" out of:"+str(len(hashes_to_keep)),end='\r\n')
         cleanup_and_exit()
-    else:
-        
+    else:      
         #sanity check: the whole scheme hinges on the assumption that all the found SSL segments belong to the same TCP stream
-        tshark_arg = 'frame.number=='+frames_wanted[0]
-        for frame in frames_wanted[1:]:
+        tshark_arg = 'frame.number=='+frames_to_keep[0]
+        for frame in frames_to_keep[1:]:
             tshark_arg += ' or frame.number=='+frame
         try:
             tcpstreams_str =  subprocess.check_output([tshark_exepath, '-r', seller_dumpcap_capture_file, '-Y', tshark_arg, '-T', 'fields', '-e', 'tcp.stream'])
@@ -269,10 +287,7 @@ def send_logs_to_escrow(ssl_hashes):
         
         #-------------------------------------------------------------------------------------------------
         #Obsolete code left here just in case
-        ##prepare the cap file to be sent from gateway user to escrow. Leave only frames wanted, purge the rest.
-        #frames_to_purge = ssl_frames
         #[frames_to_purge.remove(item) for item in frames_wanted if item in frames_to_purge]
-        #End of obsolete code
         #----------------------------------------------------------------------------------------------
         
         #Leave only the TCP stream of the SSL segments we need to keep
@@ -284,11 +299,11 @@ def send_logs_to_escrow(ssl_hashes):
         frames_to_keep_str = frames_to_keep_str.rstrip()
         frames_to_keep = frames_to_keep_str.split('\n')
         
-        if len(frames_to_keep) > 500:
+        frames_in_chunk = 500
+        if len(frames_to_keep) > frames_in_chunk:
             #editcap can't handle editing more than 512 frames in one invocation, hence the workaround
             prev_last_frame = '0'
             #max amount of ssl frames in one chunk that gets processed by editcap
-            frames_in_chunk = 500
             for iteration in range(len(frames_to_keep)/frames_in_chunk + 1):
                 frame_chunk = frames_to_keep[frames_in_chunk*iteration:frames_in_chunk*(iteration+1)]
                 last_frame = frame_chunk[-1]
@@ -303,9 +318,6 @@ def send_logs_to_escrow(ssl_hashes):
                     print ('Exception in editcap',e,end='\r\n')
                     cleanup_and_exit()
                 prev_last_frame = last_frame
-
-                ##Obsolete code: chop-off up to the previous_last_frame
-                #subprocess.call([editcap_exepath, seller_dumpcap_capture_file+'3', seller_dumpcap_capture_file+partname,  '0-'+prev_last_frame])
                 
             mergecap_args = [mergecap_exepath, '-a', '-w', seller_dumpcap_capture_file+'final']
             for iteration in range(len(frames_to_keep)/frames_in_chunk + 1):
@@ -320,11 +332,67 @@ def send_logs_to_escrow(ssl_hashes):
                 subprocess.call(editcap_args)
             except Exception,e:
                 print ('Exception in editcap', e,end='\r\n')
-                cleanup_and_exit()        
-                     
+                cleanup_and_exit() 
+                
+        #if there were any POST requests to remove, find them in the newly edited cap
+        if post_hashes_present == True:
+            frames_to_remove = []
+            try:
+                frames_str = subprocess.check_output([tshark_exepath, '-r', seller_dumpcap_capture_file+'final', '-Y', 'ssl.app_data', '-T', 'fields', '-e', 'frame.number'])
+            except Exception,e:
+                print ('Exception in tshark',e,end='\r\n')
+                cleanup_and_exit()
+            frames_str = frames_str.rstrip()
+            ssl_frames = frames_str.split('\n')
+            print ('Need to process another SSL frames:', len(ssl_frames),end='\r\n')
+            
+            try:
+                app_data_str = subprocess.check_output([tshark_exepath, '-r', seller_dumpcap_capture_file+'final', '-Y', 'ssl.app_data', '-T', 'fields', '-e', 'ssl.app_data'])
+            except Exception,e:
+                print ('Exception in tshark',e)
+                cleanup_and_exit()
+            app_data_str = app_data_str.rstrip()
+            app_data = app_data_str.split('\n')
+            if len(app_data) != len(ssl_frames):
+                print ('Mismatch in number of frames and application data items',end='\r\n')
+                cleanup_and_exit()
+                
+            break_out = False
+            for index,appdata in enumerate(app_data):
+                print ('Processing frame ' + str(index+1) + ' out of total ' + str(len(ssl_frames)), end='\r\n')        
+                #(ssl.app_data comma-delimits multiple SSL segments within the same frame)
+                segments = appdata.split(',')
+                
+                for one_segment in segments:
+                    one_segment = one_segment.replace(':',' ')
+                    ssl_md5 = hashlib.md5(bytearray.fromhex(one_segment)).hexdigest()
+                    if ssl_md5 in hashes_to_remove:
+                        print ("found hash", ssl_md5, end='\r\n')
+                        frames_to_remove.append(ssl_frames[index])
+                        #'POST' is an item of ssl_frames list, subtract it when comparing list sizes
+                        if len(frames_to_remove) == len(hashes_to_remove):
+                            break_out = True
+                            break
+                if break_out == True:
+                    break
+                    
+            if len(frames_to_remove) != len(hashes_to_remove):
+                print ("Couldn't find all SSL frames with given hashes. Frames found:"+str(len(frames_to_remove))+" out of:"+str(len(hashes_to_remove)),end='\r\n')
+                cleanup_and_exit()
+                
+            #Remove the frames
+            editcap_args = [editcap_exepath, seller_dumpcap_capture_file+'final', seller_dumpcap_capture_file+'final2']
+            for frame in frames_to_remove:
+                editcap_args.append(frame)
+            try:
+                subprocess.call(editcap_args)
+            except Exception,e:
+                print ('Exception in editcap',e,end='\r\n')
+                cleanup_and_exit()
+                      
         #at this point, send the capture to escrow. For testing, save it locally.
-        #don't forget to base64 encodeit if sending via http head
-        shutil.copy(seller_dumpcap_capture_file+'final', os.path.join(installdir,'escrow','escrow.pcap'))
+        #don't forget to base64 encode it if sending via http head
+        shutil.copy(seller_dumpcap_capture_file+('final2' if post_hashes_present else 'final' ), os.path.join(installdir,'escrow','escrow.pcap'))
         
 
 #the return value will be placed into HTTP header and sent to buyer. Python has a 64K limit on header size
@@ -383,7 +451,7 @@ def seller_start_bitcoind_stunnel_sshpass_dumpcap_squid(skip_capture):
         
         print ("Starting ssh connection to escrow's server",end='\r\n')
         try:
-            sshpass_proc = subprocess.Popen([sshpass_exepath, '-p', escrow_ssh_pass, ssh_exepath, escrow_ssh_user+'@'+escrow_host, '-R', str(escrow_port)+':localhost:33310'], stdout=open(os.path.join(installdir, 'ssh', "ssh_seller.stdout"),'w'), stderr=open(os.path.join(installdir, 'ssh', "ssh_seller.stderr"),'w'))
+            sshpass_proc = subprocess.Popen([sshpass_exepath, '-p', escrow_ssh_pass, ssh_exepath, escrow_ssh_user+'@'+escrow_host, '-p', str(escrow_ssh_port), '-R', str(escrow_random_port)+':localhost:33310'], stdout=open(os.path.join(installdir, 'ssh', "ssh_seller.stdout"),'w'), stderr=open(os.path.join(installdir, 'ssh', "ssh_seller.stderr"),'w'))
         except:
             print ('Exception connecting to sshd',end='\r\n')
             cleanup_and_exit()
@@ -488,7 +556,7 @@ def buyer_start_bitcoind_stunnel_sshpass_dumpcap(skip_capture):
     
     print ('Starting ssh connection',end='\r\n')
     try:
-        sshpass_proc = subprocess.Popen([sshpass_exepath, '-p', escrow_ssh_pass, ssh_exepath, escrow_ssh_user+'@'+escrow_host, '-L', '33309:localhost:'+str(escrow_port)], stdout=open(os.devnull,'w'))
+        sshpass_proc = subprocess.Popen([sshpass_exepath, '-p', escrow_ssh_pass, ssh_exepath, escrow_ssh_user+'@'+escrow_host, '-p', str(escrow_ssh_port), '-L', '33309:localhost:'+str(escrow_random_port)], stdout=open(os.devnull,'w'))
     except:
         print ('Exception connecting to sshd',end='\r\n')
         cleanup_and_exit()
@@ -513,14 +581,14 @@ def buyer_start_bitcoind_stunnel_sshpass_dumpcap(skip_capture):
         pids['stunnel'] = pid
             
         print ('Making a test connection to example.org through the tunnel',end='\r\n')
-        #make a test request to see if stunnel setup is working. Two attempts with a 3 sec interval (in case seller hasn't yet caught up with his initialization)
-        for i in range(2):
+        #make a test request to see if stunnel setup is working. Two attempts with a 5 sec interval (in case seller hasn't yet caught up with his initialization)
+        for i in range(3):
             try:
                 response = requests.get("http://example.org", proxies={"http":"http://127.0.0.1:3128"}, timeout=10)
             except Exception,e:
                 if i == 0:
-                    print ("Can't connect. Sleeping 3 secs and retrying",end='\r\n')
-                    time.sleep(3)
+                    print ("Can't connect. Sleeping 5 secs and retrying",end='\r\n')
+                    time.sleep(5)
                     continue
                 else:        
                     print ("Error while making a test connection",e,end='\r\n')
@@ -673,9 +741,9 @@ def buyer_get_sslhashes(capturefile, htmlhashes):
         if htmlhash == '':
             print ('empty hash provided. Please investigate',end='\r\n')
             cleanup_and_exit()
-        #get frame numbers of all http responses that came from the bank
+        #get frame numbers of all non-empty html responses that came from the bank (ignore code 204 No Content)
         try:
-            frames_str = subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', 'ssl and http.content_type contains html', '-T', 'fields', '-e', 'frame.number', '-o', 'ssl.keylog_file: '+sslkeylogfile])
+            frames_str = subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', 'ssl and http.content_type contains html  and http.response.code != 204', '-T', 'fields', '-e', 'frame.number', '-o', 'ssl.keylog_file: '+sslkeylogfile])
         except Exception,e:
             print ('Error starting tshark', e,end='\r\n')
             cleanup_and_exit()
@@ -764,9 +832,8 @@ def buyer_get_sslhashes(capturefile, htmlhashes):
                 sslhashes.append(hashlib.md5(bytearray.fromhex(one_segment)).hexdigest())
                 
                                          
-        # For good measure tell the seller to remove any packets containing HTTP POST requests
-        # This way we guarantee that no login credentials will ever get accidentally submitted to escrow
-                       
+        # For good measure instruct the seller to remove any packets containing HTTP POST requests
+        # This way we guarantee that no login credentials will ever get accidentally submitted to escrow                   
         try:
             post_requests_str = subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', 'ssl and tcp.stream=='+tcpstreams[0]+' and http.request.method==POST', '-T', 'fields', '-e', 'frame.number'])
         except Exception,e:
@@ -783,18 +850,19 @@ def buyer_get_sslhashes(capturefile, htmlhashes):
                 except Exception,e:
                     print ('Error starting tshark',e,end='\r\n')
                     cleanup_and_exit()
-                frames_ssl_hex = frame_ssl_hex.rstrip()
+                frames_ssl_hex = frames_ssl_hex.rstrip()
                 frames_ssl_hex = frames_ssl_hex.split('\n')
                 for frame_hex in frames_ssl_hex:
-                    #get rid of commas and colons
                     #(ssl.app_data comma-delimits multiple SSL segments within the same frame)
-                    frame_hex = frame_hex.replace(',',' ')
-                    frame_hex = frame_hex.replace(':',' ')
-                    if frame_hex == ' ':
-                        print ('empty frame hex. Please investigate',end='\r\n')
-                        cleanup_and_exit()
-                    sslhashes.append(hashlib.md5(bytearray.fromhex(frame_hex)).hexdigest())
-    
+                    frame_segments = frame_hex.split(',')
+                    for one_segment in frame_segments:
+                        #get rid of colons
+                        one_segment = one_segment.replace(':',' ')
+                        if one_segment == ' ':
+                            print ('empty frame hex. Please investigate',end='\r\n')
+                            cleanup_and_exit()
+                        sslhashes.append(hashlib.md5(bytearray.fromhex(one_segment)).hexdigest())
+                                
     #The buyer has to process the capture file just like the seller will
     #The buyer has to ensure that HTML is readable and any POSTs are not present
     
