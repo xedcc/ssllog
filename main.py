@@ -741,9 +741,9 @@ def buyer_get_sslhashes(capturefile, htmlhashes):
         if htmlhash == '':
             print ('empty hash provided. Please investigate',end='\r\n')
             cleanup_and_exit()
-        #get frame numbers of all non-empty html responses that came from the bank (ignore code 204 No Content)
+        #get frame numbers of all non-empty html responses that came from the bank (ignore codes such as 204:No Content, 302:Found, 304:Not Modified, because there is no useful html in them )
         try:
-            frames_str = subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', 'ssl and http.content_type contains html  and http.response.code != 204', '-T', 'fields', '-e', 'frame.number', '-o', 'ssl.keylog_file: '+sslkeylogfile])
+            frames_str = subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', 'ssl and http.content_type contains html  and http.response.code == 200', '-T', 'fields', '-e', 'frame.number', '-o', 'ssl.keylog_file: '+sslkeylogfile])
         except Exception,e:
             print ('Error starting tshark', e,end='\r\n')
             cleanup_and_exit()
@@ -766,7 +766,7 @@ def buyer_get_sslhashes(capturefile, htmlhashes):
                 cleanup_and_exit()
             md5hash = get_htmlhash_from_asciidump(ascii_dump)
             if md5hash == 0:
-                print ("Expected to find HTML, but non found in frame " + str(frame) + " Please investigate",end='\r\n')
+                print ("Expected to find HTML, but none found in frame " + str(frame) + " Please investigate",end='\r\n')
                 continue
             if htmlhash == md5hash:
                 found_frame = frame
