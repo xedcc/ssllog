@@ -60,12 +60,12 @@ capinfos_exepath = '/usr/local/bin/capinfos'
 mergecap_exepath = '/usr/local/bin/mergecap'
 
 #where buyer's dumpcap puts its traffic capture file
-buyer_dumpcap_capture_file= os.path.join(installdir, 'capture', 'buyer_dumpcap.pcap')
+buyer_dumpcap_capture_file= os.path.join(installdir, 'dumpcap', 'buyer_dumpcap.pcap')
 #where seller's dumpcap puts its traffic capture file
-seller_dumpcap_capture_file= os.path.join(installdir, 'capture', 'seller_dumpcap.pcap')
+seller_dumpcap_capture_file= os.path.join(installdir, 'dumpcap', 'seller_dumpcap.pcap')
 #where Firefox saves html files when user marks them
 htmldir = os.path.join(installdir,'htmldir')
-sslkeylogfile = os.path.join(installdir, 'capture', 'sslkeylog')
+sslkeylogfile = os.path.join(installdir, 'dumpcap', 'sslkeylog')
 
 #bitcond user/pass are already in bitcon.conf that comes with this installation
 #these bitcond handlers can be initialized even before bitcoind starts
@@ -89,7 +89,7 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
         elif self.path == '/tempdir':
             self.send_response(200)
             self.send_header("response", "tempdir")
-            self.send_header("value", os.path.join(installdir, 'capture', 'dummy'))
+            self.send_header("value", os.path.join(installdir, 'firefox', 'dummy'))
             super(buyer_HandlerClass, self).do_HEAD()
         elif self.path == '/finished':
             self.send_response(200)
@@ -183,7 +183,7 @@ def buyer_send_sslkeylogfile():
        #cleanup_and_exit()
     
     #For local testing - just copy it into the escrow folder
-    shutil.copy(os.path.join(installdir, 'capture', 'sslkeylog'), os.path.join(installdir,'escrow','sslkeylog'))    
+    shutil.copy(os.path.join(installdir, 'dumpcap', 'sslkeylog'), os.path.join(installdir,'escrow','sslkeylog'))    
     
 def buyer_start_stunnel_with_certificate(skip_capture):
     global pids
@@ -436,11 +436,6 @@ def seller_start_bitcoind_stunnel_sshpass_dumpcap_squid(skip_capture):
     
     if skip_capture == False:
         print ("Starting bitcoind in offline mode. No part of blockchain will be downloaded",end='\r\n')
-        if os.path.isdir(os.path.join(installdir, 'bitcoind')) == False:
-            os.makedirs(os.path.join(installdir, 'bitcoind'))
-        if os.path.isdir(os.path.join(installdir, 'bitcoind', 'datadir_seller')) == False:
-            os.makedirs(os.path.join(installdir, 'bitcoind', 'datadir_seller'))
-           
         try:
            #start bitcoind in offline mode
            bitcoind_proc = subprocess.Popen([bitcoind_exepath, '-datadir=' + os.path.join(installdir, 'bitcoind', "datadir_seller"), '-maxconnections=0', '-server', '-listen=0', '-rpcuser=ssllog_user', '-rpcpassword=ssllog_pswd', '-rpcport=8339'], stdout=open(os.path.join(installdir, 'bitcoind', "bitcoind_seller.stdout"),'w'), stderr=open(os.path.join(installdir, 'bitcoind', "bitcoind_seller.stderr"),'w'))
@@ -540,12 +535,7 @@ def buyer_start_bitcoind_stunnel_sshpass_dumpcap(skip_capture):
     global ppid
     
     if skip_capture == False:
-        print ('Starting bitcoind',end='\r\n')
-        if os.path.isdir(os.path.join(installdir, 'bitcoind')) == False:
-           os.makedirs(os.path.join(installdir, 'bitcoind'))
-        if os.path.isdir(os.path.join(installdir, 'bitcoind', 'datadir_buyer')) == False:
-           os.makedirs(os.path.join(installdir, 'bitcoind', 'datadir_buyer'))
-      
+        print ('Starting bitcoind',end='\r\n')     
         try:
             #start bitcoind in offline mode
             bitcoind_proc = subprocess.Popen([bitcoind_exepath, '-datadir=' + os.path.join(installdir, 'bitcoind', "datadir_buyer"), '-maxconnections=0', '-server', '-listen=0', '-rpcuser=ssllog_user', '-rpcpassword=ssllog_pswd', '-rpcport=8338'], stdout=open(os.path.join(installdir, 'bitcoind', "bitcoind_buyer.stdout"),'w'), stderr=open(os.path.join(installdir, 'bitcoind', "bitcoind_buyer.stderr"),'w'))
@@ -556,7 +546,7 @@ def buyer_start_bitcoind_stunnel_sshpass_dumpcap(skip_capture):
     
     print ('Starting ssh connection',end='\r\n')
     try:
-        sshpass_proc = subprocess.Popen([sshpass_exepath, '-p', escrow_ssh_pass, ssh_exepath, escrow_ssh_user+'@'+escrow_host, '-p', str(escrow_ssh_port), '-L', '33309:localhost:'+str(escrow_random_port)], stdout=open(os.devnull,'w'))
+        sshpass_proc = subprocess.Popen([sshpass_exepath, '-p', escrow_ssh_pass, ssh_exepath, escrow_ssh_user+'@'+escrow_host, '-p', str(escrow_ssh_port), '-L', '33309:localhost:'+str(escrow_random_port)], stdout=open(os.path.join(installdir, 'ssh','ssh_buyer.stdout'),'w'),  stderr=open(os.path.join(installdir, 'ssh','ssh_buyer.stderr'),'w'))
     except:
         print ('Exception connecting to sshd',end='\r\n')
         cleanup_and_exit()
@@ -706,7 +696,7 @@ def start_firefox():
             cleanup_and_exit()
 
     #create an empty dummy file
-    dummy = open (os.path.join(installdir, "capture", 'dummy'), "w+")
+    dummy = open (os.path.join(installdir, "firefox", 'dummy'), "w+")
     dummy.close()
 
     #SSLKEYLOGFILE
@@ -1007,7 +997,7 @@ def rearrange_outoforder_frames(capture_file):
     special_flags = ["0x0011","0x0002","0x0012"]
     
     global installdir
-    capturedir = os.path.join(installdir, 'capture')
+    capturedir = os.path.join(installdir, 'dumpcap')
     #backup the original capture file
     new_capture_file = os.path.join(capturedir, 'new_' + os.path.basename(capture_file))
     shutil.copyfile(capture_file, new_capture_file)
@@ -1171,9 +1161,39 @@ def rearrange_outoforder_frames(capture_file):
     print ('Total times succeeded to rearrange ' + str(rearrange_success_count),end='\r\n')
     return new_capture_file
     
+def create_directories_buyer():
+    if os.path.isdir(os.path.join(installdir, 'bitcoind')) == False:
+        os.makedirs(os.path.join(installdir, 'bitcoind'))
+    if os.path.isdir(os.path.join(installdir, 'bitcoind', 'datadir_buyer')) == False:
+        os.makedirs(os.path.join(installdir, 'bitcoind', 'datadir_buyer'))
+            
+    if os.path.isdir(os.path.join(installdir, 'ssh')) == False:
+        os.makedirs(os.path.join(installdir, 'ssh'))
+        
+    if os.path.isdir(os.path.join(installdir, 'dumpcap')) == False:
+        os.makedirs(os.path.join(installdir, 'dumpcap'))
+        
+    if os.path.isdir(os.path.join(installdir, 'firefox')) == False:
+        os.makedirs(os.path.join(installdir, 'firefox'))
     
+    if os.path.isdir(os.path.join(installdir, 'htmldir')) == False:
+        os.makedirs(os.path.join(installdir, 'htmldir'))
+            
     
-    
+def create_directories_seller():
+    if os.path.isdir(os.path.join(installdir, 'bitcoind')) == False:
+        os.makedirs(os.path.join(installdir, 'bitcoind'))
+    if os.path.isdir(os.path.join(installdir, 'bitcoind', 'datadir_seller')) == False:
+        os.makedirs(os.path.join(installdir, 'bitcoind', 'datadir_seller'))
+            
+    if os.path.isdir(os.path.join(installdir, 'ssh')) == False:
+        os.makedirs(os.path.join(installdir, 'ssh'))
+        
+    if os.path.isdir(os.path.join(installdir, 'dumpcap')) == False:
+        os.makedirs(os.path.join(installdir, 'dumpcap'))
+        
+    if os.path.isdir(os.path.join(installdir, 'squid')) == False:
+        os.makedirs(os.path.join(installdir, 'squid'))
     
 def cleanup_and_exit():
     print ('Cleaning up and exitting',end='\r\n')
@@ -1215,6 +1235,7 @@ if __name__ == "__main__":
     
     if role=='buyer':
         #global pids
+        create_directories_buyer()
         buyer_start_bitcoind_stunnel_sshpass_dumpcap(skip_capture)
         
         if skip_capture == False:
@@ -1263,6 +1284,7 @@ if __name__ == "__main__":
         
     elif role == 'seller':
         #global pids
+        create_directories_seller()
         seller_start_bitcoind_stunnel_sshpass_dumpcap_squid(skip_capture)
         
         #minihttp is responsible for sending the certificate and receiving ssl hashes
