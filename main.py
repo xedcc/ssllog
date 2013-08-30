@@ -564,8 +564,8 @@ def buyer_start_bitcoind_stunnel_sshpass_dumpcap(skip_capture):
             print ('Exception starting stunnel',end='\r\n')
             cleanup_and_exit()
         #stunnel changes PID after launch, use pidfile
-        #give it a second to create the pid file
-        time.sleep(1)
+        #give it some time to create the pid file
+        time.sleep(3)
         pidfile = open('/tmp/stunnel.pid', 'r')
         pid = int(pidfile.read().strip())
         pids['stunnel'] = pid
@@ -700,13 +700,13 @@ def start_firefox():
     dummy.close()
 
     #SSLKEYLOGFILE
-    sslkeylogfile_path = os.path.join(installdir, 'capture', 'sslkeylog')
+    sslkeylogfile_path = os.path.join(installdir, 'dumpcap', 'sslkeylog')
     os.putenv("SSLKEYLOGFILE", sslkeylogfile_path)
     #TMP is where the html files are going to be saved
     os.putenv("TMP", os.path.join(installdir, 'htmldir'))
     print ("Starting a new instance of Firefox with a new profile",end='\r\n')
     try:
-        subprocess.Popen([firefox_exepath,'-new-instance', '-P', 'ssllog'], stdout=open(os.path.join(installdir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(installdir, 'firefox', "firefox.stderr")))
+        subprocess.Popen([firefox_exepath,'-new-instance', '-P', 'ssllog'], stdout=open(os.path.join(installdir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(installdir, 'firefox', "firefox.stderr"), 'w'))
     except Exception,e:
         print ("Error starting Firefox", e,end='\r\n')
         cleanup_and_exit()
@@ -1191,10 +1191,7 @@ def create_directories_seller():
         
     if os.path.isdir(os.path.join(installdir, 'dumpcap')) == False:
         os.makedirs(os.path.join(installdir, 'dumpcap'))
-        
-    if os.path.isdir(os.path.join(installdir, 'squid')) == False:
-        os.makedirs(os.path.join(installdir, 'squid'))
-    
+           
 def cleanup_and_exit():
     print ('Cleaning up and exitting',end='\r\n')
     global pids
