@@ -230,6 +230,7 @@ def send_logs_to_escrow(ssl_hashes):
         cleanup_and_exit()
     frames_str = frames_str.rstrip()
     ssl_frames = frames_str.split('\n')
+    ssl_frames.reverse()
     print ('need to process SSL frames:', len(ssl_frames),end='\r\n')
     
     try:
@@ -239,17 +240,18 @@ def send_logs_to_escrow(ssl_hashes):
         cleanup_and_exit()
     app_data_str = app_data_str.rstrip()
     app_data = app_data_str.split('\n')
+    app_data.reverse()
     if len(app_data) != len(ssl_frames):
         print ('Mismatch in number of frames and application data items',end='\r\n')
         cleanup_and_exit()
       
     break_out = False
-    frames_to_keep = []    
+    frames_to_keep = []
+    #the list is reversed() to search from it's end and finish the loop faster
     for index,appdata in enumerate(app_data):
         print ('Processing frame ' + str(index+1) + ' out of total ' + str(len(ssl_frames)),end='\r\n')        
         #(ssl.app_data comma-delimits multiple SSL segments within the same frame)
         segments = appdata.split(',')
-        
         for one_segment in segments:
             one_segment = one_segment.replace(':',' ')
             ssl_md5 = hashlib.md5(bytearray.fromhex(one_segment)).hexdigest()
@@ -621,7 +623,7 @@ def seller_start_minihttp_thread(retval):
     sa = httpd.socket.getsockname()
     print ("Serving HTTP on", sa[0], "port", sa[1], "...",end='\r\n')
     sslhashes = httpd.serve_forever()
-    print ('Returning from HTTP server, sslhashes:',sslhashes,end='\r\n')
+    #print ('Returning from HTTP server, sslhashes:',sslhashes,end='\r\n')
     #pass retval down to the thread instance
     retval.append(sslhashes)
     
@@ -1308,7 +1310,7 @@ if __name__ == "__main__":
         except Exception,e:
             print ('Exception while processing', pid[0], pid[1], e,end='\r\n')
             cleanup_and_exit()
-        print ('Thread returned:', retval,end='\r\n')
+        #print ('Thread returned:', retval,end='\r\n')
             
         hashes = [hash for hash in retval[0].split(';') if len(hash)>0]
         send_logs_to_escrow(hashes)
