@@ -873,11 +873,13 @@ def get_htmlhash_from_asciidump(ascii_dump):
     #the very last entry of "De-chunked entity body" for no-compression no-chunks HTML. If not present, then
     #the very last entry of "Reassembled SSL" for no-compression no-chunks HTML in multiple SSL segments (very rare),
     #and finally, the very last entry of "Decrypted SSL data" for no-compression no-chunks HTML in a single SSL segment.
+    already_found = False
     dechunked_pos = -1
     reassembled_pos = -1
     decrypted_pos = -1
     uncompr_pos = ascii_dump.rfind('Uncompressed entity body')
     if uncompr_pos != -1:
+        already_found = True
         for line in ascii_dump[uncompr_pos:].split('\n')[1:]:
             #convert ascii representation of hex into binary so long as first 4 chars are hexdigits
             if all(c in hexdigits for c in line [:4]):
@@ -886,9 +888,10 @@ def get_htmlhash_from_asciidump(ascii_dump):
             else:
                 break
             
-    if uncompr_pos == -1:
+    if uncompr_pos == -1 and not already_found:
         dechunked_pos = ascii_dump.rfind('De-chunked entity body')
-        if dechunked_pos != -1:     
+        if dechunked_pos != -1:
+            already_found = True
             for line in ascii_dump[dechunked_pos:].split('\n')[1:]:
                 #convert ascii representation of hex into binary
                 #only deal with lines where first 4 chars are hexdigits
@@ -898,9 +901,10 @@ def get_htmlhash_from_asciidump(ascii_dump):
                 else:
                     break
                 
-    if dechunked_pos == -1:
+    if dechunked_pos == -1 and not already_found:
         reassembled_pos = ascii_dump.rfind('Reassembled SSL')
-        if reassembled_pos != -1:     
+        if reassembled_pos != -1:
+            already_found = True
             #skip the HTTP header and find where the HTTP body starts
             body_start = reassembled_pos + ascii_dump[reassembled_pos:].find('0d 0a 0d 0a')
             if body_start == -1:
@@ -919,9 +923,10 @@ def get_htmlhash_from_asciidump(ascii_dump):
                 else:
                     break
                 
-    if reassembled_pos == -1:
+    if reassembled_pos == -1 and not already_found:
         decrypted_pos = ascii_dump.rfind('Decrypted SSL data')
-        if decrypted_pos != -1:     
+        if decrypted_pos != -1:  
+            already_found = True
             #skip the HTTP header and find where the HTTP body starts
             body_start = decrypted_pos + ascii_dump[decrypted_pos:].find('0d 0a 0d 0a')
             if body_start == -1:
@@ -940,7 +945,7 @@ def get_htmlhash_from_asciidump(ascii_dump):
                 else:
                     break
                     
-    else:
+    if decrypted_pos == -1 and not already_found:
         #example.org's response going through squid ends up as ungzipped, unchunked HTML
         page_end = ascii_dump.rfind('.\n\n')
         if page_end == -1:
