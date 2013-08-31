@@ -269,13 +269,14 @@ def send_logs_to_escrow(ssl_hashes):
         cleanup_and_exit()
     else:      
         #sanity check: the whole scheme hinges on the assumption that all the found SSL segments belong to the same TCP stream
+        print ('Checking that all frames belong to the same TCP stream',end='\r\n')
         tshark_arg = 'frame.number=='+frames_to_keep[0]
         for frame in frames_to_keep[1:]:
             tshark_arg += ' or frame.number=='+frame
         try:
             tcpstreams_str =  subprocess.check_output([tshark_exepath, '-r', seller_dumpcap_capture_file, '-Y', tshark_arg, '-T', 'fields', '-e', 'tcp.stream'])
         except Exception,e:
-            print ('Error starting tshark',e)
+            print ('Error starting tshark',e,end='\r\n')
             cleanup_and_exit()
         tcpstreams_str = tcpstreams_str.rstrip()
         tcpstreams = tcpstreams_str.split('\n')
@@ -283,118 +284,127 @@ def send_logs_to_escrow(ssl_hashes):
         if tcpstreams.count(tcpstreams[0]) != len(tcpstreams):
             print ("A very serious issue encountered. Not all SSL segments belong to the same TCP stream. Please contact the developers",end='\r\n')
             cleanup_and_exit()
-        
-        
-        print ("All SSL segments found, removing all confidential information from the captured traffic",end='\r\n')
-        
-        #-------------------------------------------------------------------------------------------------
-        #Obsolete code left here just in case
-        #[frames_to_purge.remove(item) for item in frames_wanted if item in frames_to_purge]
-        #----------------------------------------------------------------------------------------------
-        
-        #Leave only the TCP stream of the SSL segments we need to keep
-        try:
-            frames_to_keep_str =  subprocess.check_output([tshark_exepath, '-r', seller_dumpcap_capture_file, '-Y', 'tcp.stream=='+tcpstreams[0], '-T', 'fields', '-e', 'frame.number'])
-        except Exception,e:
-            print ('Error starting tshark',e,end='\r\n')
-            cleanup_and_exit()
-        frames_to_keep_str = frames_to_keep_str.rstrip()
-        frames_to_keep = frames_to_keep_str.split('\n')
-        
-        frames_in_chunk = 500
-        if len(frames_to_keep) > frames_in_chunk:
-            #editcap can't handle editing more than 512 frames in one invocation, hence the workaround
-            prev_last_frame = '0'
-            #max amount of ssl frames in one chunk that gets processed by editcap
-            for iteration in range(len(frames_to_keep)/frames_in_chunk + 1):
-                frame_chunk = frames_to_keep[frames_in_chunk*iteration:frames_in_chunk*(iteration+1)]
-                last_frame = frame_chunk[-1]
-                partname = 'part' + str(iteration+1)
-                subprocess.call([editcap_exepath, seller_dumpcap_capture_file, seller_dumpcap_capture_file+'2', '-r', '0-'+last_frame])
-                editcap_args = [editcap_exepath, seller_dumpcap_capture_file+'2', seller_dumpcap_capture_file+partname, '-r']
-                for frame in frame_chunk:
-                    editcap_args.append(frame)
-                try:
-                    subprocess.call(editcap_args)
-                except Exception,e:
-                    print ('Exception in editcap',e,end='\r\n')
-                    cleanup_and_exit()
-                prev_last_frame = last_frame
-                
-            mergecap_args = [mergecap_exepath, '-a', '-w', seller_dumpcap_capture_file+'final']
-            for iteration in range(len(frames_to_keep)/frames_in_chunk + 1):
-                mergecap_args.append(seller_dumpcap_capture_file+'part'+ str(iteration+1))
-                subprocess.call(mergecap_args)
-                
-        else:
-            editcap_args = [editcap_exepath, seller_dumpcap_capture_file, seller_dumpcap_capture_file+'final', '-r']
-            for frame in frames_to_keep:
-                editcap_args.append(frame)
-            try:
-                subprocess.call(editcap_args)
-            except Exception,e:
-                print ('Exception in editcap', e,end='\r\n')
-                cleanup_and_exit() 
-                
-        #if there were any POST requests to remove, find them in the newly edited cap
-        if post_hashes_present == True:
-            frames_to_remove = []
-            try:
-                frames_str = subprocess.check_output([tshark_exepath, '-r', seller_dumpcap_capture_file+'final', '-Y', 'ssl.app_data', '-T', 'fields', '-e', 'frame.number'])
-            except Exception,e:
-                print ('Exception in tshark',e,end='\r\n')
-                cleanup_and_exit()
-            frames_str = frames_str.rstrip()
-            ssl_frames = frames_str.split('\n')
-            print ('Need to process another SSL frames:', len(ssl_frames),end='\r\n')
             
-            try:
-                app_data_str = subprocess.check_output([tshark_exepath, '-r', seller_dumpcap_capture_file+'final', '-Y', 'ssl.app_data', '-T', 'fields', '-e', 'ssl.app_data'])
-            except Exception,e:
-                print ('Exception in tshark',e)
-                cleanup_and_exit()
-            app_data_str = app_data_str.rstrip()
-            app_data = app_data_str.split('\n')
-            if len(app_data) != len(ssl_frames):
-                print ('Mismatch in number of frames and application data items',end='\r\n')
-                cleanup_and_exit()
-                
-            break_out = False
-            for index,appdata in enumerate(app_data):
-                print ('Processing frame ' + str(index+1) + ' out of total ' + str(len(ssl_frames)), end='\r\n')        
-                #(ssl.app_data comma-delimits multiple SSL segments within the same frame)
-                segments = appdata.split(',')
-                
-                for one_segment in segments:
-                    one_segment = one_segment.replace(':',' ')
-                    ssl_md5 = hashlib.md5(bytearray.fromhex(one_segment)).hexdigest()
-                    if ssl_md5 in hashes_to_remove:
-                        print ("found hash", ssl_md5, end='\r\n')
-                        frames_to_remove.append(ssl_frames[index])
-                        #'POST' is an item of ssl_frames list, subtract it when comparing list sizes
-                        if len(frames_to_remove) == len(hashes_to_remove):
-                            break_out = True
-                            break
-                if break_out == True:
-                    break
-                    
-            if len(frames_to_remove) != len(hashes_to_remove):
-                print ("Couldn't find all SSL frames with given hashes. Frames found:"+str(len(frames_to_remove))+" out of:"+str(len(hashes_to_remove)),end='\r\n')
-                cleanup_and_exit()
-                
-            #Remove the frames
-            editcap_args = [editcap_exepath, seller_dumpcap_capture_file+'final', seller_dumpcap_capture_file+'final2']
-            for frame in frames_to_remove:
+    print ("Cutting off all frames following the last SSL frame",end='\r\n')
+    #This is needed so that the escrow could be sure that the last HTML file in the TCP stream is the target
+    cut_off_point = sorted(frames_to_keep)[-1]   
+    try:
+        subprocess.call([editcap_exepath, seller_dumpcap_capture_file, seller_dumpcap_capture_file+'1', '-r', '0-'+cut_off_point])
+    except Exception,e:
+        print ('Exception in editcap',e,end='\r\n')
+        cleanup_and_exit()
+        
+        
+    print ("All SSL segments found, removing all confidential information from the captured traffic",end='\r\n')
+    
+    #-------------------------------------------------------------------------------------------------
+    #Obsolete code left here just in case
+    #[frames_to_purge.remove(item) for item in frames_wanted if item in frames_to_purge]
+    #----------------------------------------------------------------------------------------------
+    
+    #Leave only the TCP stream of the SSL segments we need to keep
+    try:
+        frames_to_keep_str =  subprocess.check_output([tshark_exepath, '-r', seller_dumpcap_capture_file+'1', '-Y', 'tcp.stream=='+tcpstreams[0], '-T', 'fields', '-e', 'frame.number'])
+    except Exception,e:
+        print ('Error starting tshark',e,end='\r\n')
+        cleanup_and_exit()
+    frames_to_keep_str = frames_to_keep_str.rstrip()
+    frames_to_keep = frames_to_keep_str.split('\n')
+    
+    frames_in_chunk = 500
+    if len(frames_to_keep) > frames_in_chunk:
+        #editcap can't handle editing more than 512 frames in one invocation, hence the workaround
+        prev_last_frame = '0'
+        #max amount of ssl frames in one chunk that gets processed by editcap
+        for iteration in range(len(frames_to_keep)/frames_in_chunk + 1):
+            frame_chunk = frames_to_keep[frames_in_chunk*iteration:frames_in_chunk*(iteration+1)]
+            last_frame = frame_chunk[-1]
+            partname = 'part' + str(iteration+1)
+            subprocess.call([editcap_exepath, seller_dumpcap_capture_file+'1', seller_dumpcap_capture_file+'2', '-r', '0-'+last_frame])
+            editcap_args = [editcap_exepath, seller_dumpcap_capture_file+'2', seller_dumpcap_capture_file+partname, '-r']
+            for frame in frame_chunk:
                 editcap_args.append(frame)
             try:
                 subprocess.call(editcap_args)
             except Exception,e:
                 print ('Exception in editcap',e,end='\r\n')
                 cleanup_and_exit()
-                      
-        #at this point, send the capture to escrow. For testing, save it locally.
-        #don't forget to base64 encode it if sending via http head
-        shutil.copy(seller_dumpcap_capture_file+('final2' if post_hashes_present else 'final' ), os.path.join(installdir,'escrow','escrow.pcap'))
+            prev_last_frame = last_frame
+            
+        mergecap_args = [mergecap_exepath, '-a', '-w', seller_dumpcap_capture_file+'final']
+        for iteration in range(len(frames_to_keep)/frames_in_chunk + 1):
+            mergecap_args.append(seller_dumpcap_capture_file+'part'+ str(iteration+1))
+            subprocess.call(mergecap_args)
+            
+    else:
+        editcap_args = [editcap_exepath, seller_dumpcap_capture_file+'1', seller_dumpcap_capture_file+'final', '-r']
+        for frame in frames_to_keep:
+            editcap_args.append(frame)
+        try:
+            subprocess.call(editcap_args)
+        except Exception,e:
+            print ('Exception in editcap', e,end='\r\n')
+            cleanup_and_exit() 
+            
+    #if there were any POST requests to remove, find them in the newly edited cap
+    if post_hashes_present == True:
+        frames_to_remove = []
+        try:
+            frames_str = subprocess.check_output([tshark_exepath, '-r', seller_dumpcap_capture_file+'final', '-Y', 'ssl.app_data', '-T', 'fields', '-e', 'frame.number'])
+        except Exception,e:
+            print ('Exception in tshark',e,end='\r\n')
+            cleanup_and_exit()
+        frames_str = frames_str.rstrip()
+        ssl_frames = frames_str.split('\n')
+        print ('Need to process another SSL frames:', len(ssl_frames),end='\r\n')
+        
+        try:
+            app_data_str = subprocess.check_output([tshark_exepath, '-r', seller_dumpcap_capture_file+'final', '-Y', 'ssl.app_data', '-T', 'fields', '-e', 'ssl.app_data'])
+        except Exception,e:
+            print ('Exception in tshark',e)
+            cleanup_and_exit()
+        app_data_str = app_data_str.rstrip()
+        app_data = app_data_str.split('\n')
+        if len(app_data) != len(ssl_frames):
+            print ('Mismatch in number of frames and application data items',end='\r\n')
+            cleanup_and_exit()
+            
+        break_out = False
+        for index,appdata in enumerate(app_data):
+            print ('Processing frame ' + str(index+1) + ' out of total ' + str(len(ssl_frames)), end='\r\n')        
+            #(ssl.app_data comma-delimits multiple SSL segments within the same frame)
+            segments = appdata.split(',')
+            
+            for one_segment in segments:
+                one_segment = one_segment.replace(':',' ')
+                ssl_md5 = hashlib.md5(bytearray.fromhex(one_segment)).hexdigest()
+                if ssl_md5 in hashes_to_remove:
+                    print ("found hash", ssl_md5, end='\r\n')
+                    frames_to_remove.append(ssl_frames[index])
+                    #'POST' is an item of ssl_frames list, subtract it when comparing list sizes
+                    if len(frames_to_remove) == len(hashes_to_remove):
+                        break_out = True
+                        break
+            if break_out == True:
+                break
+                
+        if len(frames_to_remove) != len(hashes_to_remove):
+            print ("Couldn't find all SSL frames with given hashes. Frames found:"+str(len(frames_to_remove))+" out of:"+str(len(hashes_to_remove)),end='\r\n')
+            cleanup_and_exit()
+            
+        #Remove the frames
+        editcap_args = [editcap_exepath, seller_dumpcap_capture_file+'final', seller_dumpcap_capture_file+'final2']
+        for frame in frames_to_remove:
+            editcap_args.append(frame)
+        try:
+            subprocess.call(editcap_args)
+        except Exception,e:
+            print ('Exception in editcap',e,end='\r\n')
+            cleanup_and_exit()
+                  
+    #at this point, send the capture to escrow. For testing, save it locally.
+    #don't forget to base64 encode it if sending via http head
+    shutil.copy(seller_dumpcap_capture_file+('final2' if post_hashes_present else 'final' ), os.path.join(installdir,'escrow','escrow.pcap'))
         
 
 #the return value will be placed into HTTP header and sent to buyer. Python has a 64K limit on header size
@@ -594,7 +604,7 @@ def buyer_start_bitcoind_stunnel_sshpass_dumpcap(skip_capture):
         try:
             #todo: don't assume that 'lo' is the loopback, query it
             #listen in-between Firefox and stunnel, filter out all the rest of loopback traffic
-            dumpcap_proc = subprocess.Popen([dumpcap_exepath, '-i', 'lo', '-f', 'tcp port 3128', '-w', buyer_dumpcap_capture_file ], stdout=open(os.path.join(installdir, 'dumpcap', "dumpcap_buyer.stdout"),'w'), stderr=open(os.path.join(installdir, 'dumpcap', "dumpcap_buyer.stderr"),'w'))
+            dumpcap_proc = subprocess.Popen([dumpcap_exepath, '-i', 'lo', '-f', 'tcp port 8080', '-w', buyer_dumpcap_capture_file ], stdout=open(os.path.join(installdir, 'dumpcap', "dumpcap_buyer.stdout"),'w'), stderr=open(os.path.join(installdir, 'dumpcap', "dumpcap_buyer.stderr"),'w'))
         except Exception,e:
             print ('Exception starting dumpcap',e,end='\r\n')
             cleanup_and_exit()
@@ -825,9 +835,10 @@ def buyer_get_sslhashes(capturefile, htmlhashes):
                 
                                          
         # For good measure instruct the seller to remove any packets containing HTTP POST requests
-        # This way we guarantee that no login credentials will ever get accidentally submitted to escrow                   
+        # This way we guarantee that no login credentials will ever get accidentally submitted to escrow
+        #Don't remove POSTs which follow the found SSL frame, because the seller will cut off everything following the found SSL frame anyway
         try:
-            post_requests_str = subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', 'ssl and tcp.stream=='+tcpstreams[0]+' and http.request.method==POST', '-T', 'fields', '-e', 'frame.number'])
+            post_requests_str = subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', 'ssl and tcp.stream=='+tcpstreams[0]+' and http.request.method==POST and frame.number<'+found_frame, '-T', 'fields', '-e', 'frame.number'])
         except Exception,e:
             print ('Error starting tshark',e,end='\r\n')
             cleanup_and_exit()
@@ -856,9 +867,7 @@ def buyer_get_sslhashes(capturefile, htmlhashes):
                         sslhashes.append(hashlib.md5(bytearray.fromhex(one_segment)).hexdigest())
                                 
     #The buyer has to process the capture file just like the seller will
-    #The buyer has to ensure that HTML is readable and any POSTs are not present
-    
-    
+    #The buyer has to ensure that HTML is readable and any POSTs are not present   
     return sslhashes
 
 #look at tshark's ascii dump to better understand the parsing taking place
