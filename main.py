@@ -917,12 +917,30 @@ def get_htmlhash_from_asciidump(ascii_dump):
         if reassembled_pos != -1:
             already_found = True
             #skip the HTTP header and find where the HTTP body starts
-            body_start = reassembled_pos + ascii_dump[reassembled_pos:].find('0d 0a 0d 0a')
+            #The delimiter of header from body '0d 0a 0d 0a' can be spanned over two lines
+            #Hence the workaround
+            
+            lines = ascii_dump[reassembled_pos:].split('\n')
+            hexlist = [line.split()[1:17] for line in lines[1:]]
+            #flatten the nested lists acc.to http://stackoverflow.com/questions/952914/making-a-flat-list-out-of-list-of-lists-in-python
+            flathexlist = [item for sublist in hexlist for item in sublist]
+            #convert the list into a single string
+            hexstring = ''.join(flathexlist)
+            start_pos_in_hex = hexstring.find('0d0a0d0a')+len('0d0a0d0a')
+            #Knowing that there are 16 2-char hex numbers in a single line, calculate absolute position
+            start_line_in_ascii = start_pos_in_hex/32
+            line_offset_in_ascii = (start_pos_in_hex % 32)/2
+                     
+            #an ascii line is 73 chars long, each hex number takes up 2 alphanum chars + 1 space char
+            #we skip the very first line 'Reassembled SSL ...' by finding a newline.
+            #There are 6 line number chars (including spaces) at the start of each line
+            newline_offset = ascii_dump[reassembled_pos:].find('\n')
+            body_start = reassembled_pos+newline_offset+1+start_line_in_ascii*73+6+line_offset_in_ascii*3
             if body_start == -1:
                 print ('Could not find HTTP body',end='\r\n')
                 cleanup_and_exit()
                 return
-            lines = ascii_dump[body_start+len('0d 0a 0d 0a'):].split('\n')
+            lines = ascii_dump[body_start:].split('\n')
             #treat the first line specially
             binary_html += bytearray.fromhex(lines[0][:-16])
             for line in lines[1:]:
@@ -937,14 +955,33 @@ def get_htmlhash_from_asciidump(ascii_dump):
     if reassembled_pos == -1 and not already_found:
         decrypted_pos = ascii_dump.rfind('Decrypted SSL data')
         if decrypted_pos != -1:  
-            already_found = True
+            already_found = True   
             #skip the HTTP header and find where the HTTP body starts
-            body_start = decrypted_pos + ascii_dump[decrypted_pos:].find('0d 0a 0d 0a')
+            #The delimiter of header from body '0d 0a 0d 0a' can be spanned over two lines
+            #Hence the workaround
+            
+            lines = ascii_dump[decrypted_pos:].split('\n')
+            hexlist = [line.split()[1:17] for line in lines[1:]]
+            #flatten the nested lists acc.to http://stackoverflow.com/questions/952914/making-a-flat-list-out-of-list-of-lists-in-python
+            flathexlist = [item for sublist in hexlist for item in sublist]
+            #convert the list into a single string
+            hexstring = ''.join(flathexlist)
+            start_pos_in_hex = hexstring.find('0d0a0d0a')+len('0d0a0d0a')
+            #Knowing that there are 16 2-char hex numbers in a single line, calculate absolute position
+            start_line_in_ascii = start_pos_in_hex/32
+            line_offset_in_ascii = (start_pos_in_hex % 32)/2
+                     
+            #an ascii line is 73 chars long, each hex number takes up 2 alphanum chars + 1 space char
+            #we skip the very first line 'Reassembled SSL ...' by finding a newline.
+            #There are 6 line number chars (including spaces) at the start of each line
+            newline_offset = ascii_dump[decrypted_pos:].find('\n')
+            body_start = decrypted_pos+newline_offset+1+start_line_in_ascii*73+6+line_offset_in_ascii*3            
+            
             if body_start == -1:
                 print ('Could not find HTTP body',end='\r\n')
                 cleanup_and_exit()
                 return
-            lines = ascii_dump[body_start+len('0d 0a 0d 0a'):].split('\n')
+            lines = ascii_dump[body_start:].split('\n')
             #treat the first line specially
             binary_html += bytearray.fromhex(lines[0][:-16])
             for line in lines[1:]:
@@ -957,19 +994,45 @@ def get_htmlhash_from_asciidump(ascii_dump):
                     break
                     
     if decrypted_pos == -1 and not already_found:
+        #
+        #
+        #TODO Fix a corner case where strings being searched are spanned over two lines
+        #
+        #
+        
         #example.org's response going through squid ends up as ungzipped, unchunked HTML
         page_end = ascii_dump.rfind('.\n\n')
         if page_end == -1:
             print ("Could not find page's end",end='\r\n')
             return 0
+        
         page_start = ascii_dump.rfind('0d 0a 0d 0a')
-        if page_start == -1:
+        #skip the HTTP header and find where the HTTP body starts
+        #The delimiter of header from body '0d 0a 0d 0a' can be spanned over two lines
+        #Hence the workaround
+        
+        lines = ascii_dump.split('\n')
+        hexlist = [line.split()[1:17] for line in lines]
+        #flatten the nested lists acc.to http://stackoverflow.com/questions/952914/making-a-flat-list-out-of-list-of-lists-in-python
+        flathexlist = [item for sublist in hexlist for item in sublist]
+        #convert the list into a single string
+        hexstring = ''.join(flathexlist)
+        delimiter_pos = hexstring.rfind('0d0a0d0a')
+        if delimiter_pos == -1:
             print ("Could not find page's start",end='\r\n')
-            return 0
+            return 0                
+        start_pos_in_hex = delimiter_pos +len('0d0a0d0a')
+        #Knowing that there are 16 2-char hex numbers in a single line, calculate absolute position
+        start_line_in_ascii = start_pos_in_hex/32
+        line_offset_in_ascii = (start_pos_in_hex % 32)/2                 
+        #an ascii line is 73 chars long, each hex number takes up 2 alphanum chars + 1 space char
+        #There are 6 line number chars (including spaces) at the start of each line
+        page_start = start_line_in_ascii*73+6+line_offset_in_ascii*3
+              
         if page_end < page_start:
             print ("Could not find HTML page",end='\r\n')
             return 0
-        lines = ascii_dump[page_start+len('0d 0a 0d 0a'):page_end+len('.\n\n')].split('\n')
+        lines = ascii_dump[page_start:page_end+len('.\n\n')].split('\n')
         #treat the first line specially
         binary_html += bytearray.fromhex(lines[0][:-16])
         for line in lines[1:]:
