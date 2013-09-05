@@ -26,6 +26,7 @@ escrow_random_port = 0
 escrow_ssh_user = 'username' #e.g. 'ssllog_user' 
 escrow_ssh_pass = 'password'
 escrow_ssh_port = 22
+buyer_stunnel_accept_port = 8080
 
 #ssllog_installdir is the dir from which main.py is run
 currfile = inspect.getfile(inspect.currentframe())
@@ -92,6 +93,12 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
             self.send_header("value", os.path.join(installdir, 'firefox', 'dummy'))
             super(buyer_HandlerClass, self).do_HEAD()
         elif self.path == '/finished':
+            #ask seller to stop dumpcap first. Then continue.
+            #TODO wrap this in try/except
+            response = requests.head("http://127.0.0.1:4445/stopsquid", proxies={"http":"http://127.0.0.1:"+str(buyer_stunnel_accept_port)})
+            if response.status_code != 200:
+                print ("Unable to stop squid",end='\r\n')
+                cleanup_and_exit()         
             self.send_response(200)
             self.send_header("response", "finished")
             self.send_header("value", "ok")
@@ -121,7 +128,7 @@ class seller_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
             print ("Received SSL keys from the buyer",end='\r\n')
             base64_sslkeylog_str = self.path[len('/sslkeylogfile='):]
             sslkeylog_str = base64.b64decode(base64_sslkeylog_str)
-            with open (os.join.path(installdir,'escrow','sslkeylogfile'), "w") as file:
+            with open (os.path.join(installdir,'escrow','sslkeylogfile'), "w") as file:
                 file.write(sslkeylog_str)
             self.send_response(200)
             self.send_header("response", "sslkeylogfile")
@@ -136,6 +143,13 @@ class seller_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
             super(seller_HandlerClass, self).do_HEAD()
             #receiving "hashes=" message is a signal to stop this server and continue in the main thread with parsing the hashes
             self.server.stop = True
+        if self.path.startswith('/stopsquid'):
+            #TODO actually stop squid before responding
+            self.send_response(200)
+            self.send_header("response", "stopsquid")
+            self.send_header("value", "ok")
+            super(seller_HandlerClass, self).do_HEAD()
+            
     #logging messes up the terminal, disabling
     def log_message(self, format, *args):
         return
@@ -163,10 +177,21 @@ def buyer_send_sslhashes(sslhashes):
     hashes_string = ''
     for hash in sslhashes:
         hashes_string += ';'+hash
-    message = requests.head("http://127.0.0.1:4445/hashes="+hashes_string, proxies={"http":"http://127.0.0.1:3128"})
-    if message.status_code != 200:
-       print ("Unable to send SSL hashes to seller",end='\r\n')
-       cleanup_and_exit()
+    seller_contacted = False
+    for i in range(10):
+        try:
+            message = requests.head("http://127.0.0.1:4445/hashes="+hashes_string, proxies={"http":"http://127.0.0.1:"+str(buyer_stunnel_accept_port)})
+            seller_contacted = True
+            break
+        except Exception,e:
+            print ('Sleeping ' + str(i+1) + ' sec while trying to connect to the seller',end='\r\n')
+            time.sleep(1)
+    if not seller_contacted:
+        print ("Can't connect to the seller",end='\r\n')
+        cleanup_and_exit()  
+    elif message.status_code != 200:
+        print ("Unable to send SSL hashes to the seller",end='\r\n')
+        cleanup_and_exit()
 
 #send sslkeylog to escrow. For testing purposes we can send it to seller.
 #NB! There is probably a limit on header size in python
@@ -177,7 +202,7 @@ def buyer_send_sslkeylogfile():
     #keylogfile_ascii = data.__str__()
     ##base64-encode because HTTP headers don't allow newlines
     #base64_keylogfile_ascii = base64.b64encode(keylogfile_ascii)
-    #message = requests.head("http://127.0.0.1:4444/sslkeylogfile="+base64_keylogfile_ascii, proxies={"http":"http://127.0.0.1:8080"})
+    #message = requests.head("http://127.0.0.1:4444/sslkeylogfile="+base64_keylogfile_ascii, proxies={"http":"http://127.0.0.1:"+str(buyer_stunnel_accept_port)})
     #if message.status_code != 200:
        #print  "Unable to send SSL keylogfile to escrow"
        #cleanup_and_exit()
@@ -199,8 +224,19 @@ def buyer_start_stunnel_with_certificate(skip_capture):
     if skip_capture == False:
         print ('Making a test connection to example.org using the new certificate',end='\r\n')
         #make a test request to see if stunnel setup is working
-        response = requests.get("http://example.org", proxies={"http":"http://127.0.0.1:3128"})
-        if response.status_code != 200:
+        seller_contacted = False
+        for i in range(10):
+            try:
+                response = requests.get("http://example.org", proxies={"http":"http://127.0.0.1:"+str(buyer_stunnel_accept_port)})
+                seller_contacted = True
+                break
+            except Exception,e:
+                print ('Sleeping ' + str(i+1) + ' sec while trying to connect to the seller',end='\r\n')
+                time.sleep(1)
+        if not seller_contacted:
+            print ("Can't connect to the seller",end='\r\n')
+            cleanup_and_exit()  
+        elif response.status_code != 200:
             print ("Unable to make a test connection through seller's proxy",end='\r\n')
             cleanup_and_exit()
     #stunnel changes PID after launch, use pidfile
@@ -473,9 +509,20 @@ def seller_start_bitcoind_stunnel_sshpass_dumpcap_squid(skip_capture):
         print ('Exception starting stunnel',end='\r\n')
         cleanup_and_exit()
     #stunnel changes PID after launch, use pidfile
-    #give it a second to create the pid file
-    time.sleep(1)
-    pidfile = open('/tmp/stunnel2.pid', 'r')
+    #give it some time to create the pid file
+    pid_file_found = False
+    for i in range(20):
+        try:
+            pidfile = open('/tmp/stunnel2.pid', 'r')
+            pid_file_found = True
+            break
+        except Exception,e:
+            print ('Sleeping ' + str(i+1) + ' secs while stunnel pid file is being created',end='\r\n')
+            time.sleep(1)
+    if not pid_file_found:
+        print (e,end='\r\n')
+        cleanup_and_exit()
+    
     pid = int(pidfile.read().strip())
     pids['stunnel'] = pid
     
@@ -487,12 +534,12 @@ def seller_start_bitcoind_stunnel_sshpass_dumpcap_squid(skip_capture):
         cleanup_and_exit()
     pids['squid3'] = squid3_proc.pid
         
-    if skip_capture == False:    
+    if skip_capture == False:
         print ("Starting dumpcap capture of loopback traffic",end='\r\n')
         try:
             #todo: don't assume that 'lo' is the loopback, query it
             #listen in-between stunnel and squid, filter out all the rest of loopback traffic
-            dumpcap_proc = subprocess.Popen([dumpcap_exepath, '-i', 'lo', '-f', 'tcp port 3128', '-w', seller_dumpcap_capture_file ], stdout=open(os.path.join(installdir, 'dumpcap', "dumpcap_seller.stdout"),'w'), stderr=open(os.path.join(installdir, 'dumpcap', "dumpcap_seller.stderr"),'w'))
+            dumpcap_proc = subprocess.Popen([dumpcap_exepath, '-i', 'lo', '-B', '10', '-f', 'tcp port 3128', '-w', seller_dumpcap_capture_file ], stdout=open(os.path.join(installdir, 'dumpcap', "dumpcap_seller.stdout"),'w'), stderr=open(os.path.join(installdir, 'dumpcap', "dumpcap_seller.stderr"),'w'))
         except Exception,e:
             print ('Exception dumpcap',e,end='\r\n')
             cleanup_and_exit()
@@ -501,8 +548,19 @@ def seller_start_bitcoind_stunnel_sshpass_dumpcap_squid(skip_capture):
 def buyer_get_and_verify_seller_cert():
     #receive signature and plain_cert as ";" delimited string
     print ('Requesting the certificate from the seller',end='\r\n')
-    response = requests.head("http://127.0.0.1:4445/certificate", proxies={"http":"http://127.0.0.1:3128"})
-    if response.status_code != 200:
+    seller_contacted = False
+    for i in range(10):
+        try:
+            response = requests.head("http://127.0.0.1:4445/certificate", proxies={"http":"http://127.0.0.1:"+str(buyer_stunnel_accept_port)})
+            seller_contacted = True
+            break
+        except Exception,e:
+            print ('Sleeping ' + str(i+1) + ' sec while trying to connect to the seller',end='\r\n')
+            time.sleep(1)
+    if not seller_contacted:
+        print ("Can't connect to the seller",end='\r\n')
+        cleanup_and_exit()  
+    elif response.status_code != 200:
         print ("Unable to get seller's certificate",end='\r\n')
         cleanup_and_exit()
     base64_message = response.headers['value']
@@ -577,26 +635,37 @@ def buyer_start_bitcoind_stunnel_sshpass_dumpcap(skip_capture):
             cleanup_and_exit()
         #stunnel changes PID after launch, use pidfile
         #give it some time to create the pid file
-        time.sleep(3)
-        pidfile = open('/tmp/stunnel.pid', 'r')
+        pid_file_found = False
+        for i in range(20):
+            try:
+                pidfile = open('/tmp/stunnel.pid', 'r')
+                pid_file_found = True
+                break
+            except Exception,e:
+                print ('Sleeping ' + str(i+1) + ' secs while stunnel pid file is being created',end='\r\n')
+                time.sleep(1)
+        if not pid_file_found:
+            print (e,end='\r\n')
+            cleanup_and_exit()
         pid = int(pidfile.read().strip())
         pids['stunnel'] = pid
             
         print ('Making a test connection to example.org through the tunnel',end='\r\n')
         #make a test request to see if stunnel setup is working. Two attempts with a 5 sec interval (in case seller hasn't yet caught up with his initialization)
-        for i in range(3):
+        seller_contacted = False
+        for i in range(10):
             try:
-                response = requests.get("http://example.org", proxies={"http":"http://127.0.0.1:3128"}, timeout=10)
+                response = requests.get("http://example.org", proxies={"http":"http://127.0.0.1:"+str(buyer_stunnel_accept_port)})
+                seller_contacted = True                
+                break
             except Exception,e:
-                if i == 0:
-                    print ("Can't connect. Sleeping 5 secs and retrying",end='\r\n')
-                    time.sleep(5)
-                    continue
-                else:        
-                    print ("Error while making a test connection",e,end='\r\n')
-                    cleanup_and_exit()
-        if response.status_code != 200:
-            print ("Seller returned an invalid response",end='\r\n')
+                print ('Sleeping ' + str(i+1) + ' sec while trying to connect to the seller',end='\r\n')
+                time.sleep(1)
+        if not seller_contacted:
+            print ("Can't connect to the seller",e,end='\r\n')
+            cleanup_and_exit()  
+        elif response.status_code != 200:
+            print ("Error while making a test connection",end='\r\n')
             print (response.text,end='\r\n')
             cleanup_and_exit()
          
@@ -604,7 +673,7 @@ def buyer_start_bitcoind_stunnel_sshpass_dumpcap(skip_capture):
         try:
             #todo: don't assume that 'lo' is the loopback, query it
             #listen in-between Firefox and stunnel, filter out all the rest of loopback traffic
-            dumpcap_proc = subprocess.Popen([dumpcap_exepath, '-i', 'lo', '-f', 'tcp port 8080', '-w', buyer_dumpcap_capture_file ], stdout=open(os.path.join(installdir, 'dumpcap', "dumpcap_buyer.stdout"),'w'), stderr=open(os.path.join(installdir, 'dumpcap', "dumpcap_buyer.stderr"),'w'))
+            dumpcap_proc = subprocess.Popen([dumpcap_exepath, '-i', 'lo', '-B', '10', '-f', 'tcp port '+str(buyer_stunnel_accept_port), '-w', buyer_dumpcap_capture_file ], stdout=open(os.path.join(installdir, 'dumpcap', "dumpcap_buyer.stdout"),'w'), stderr=open(os.path.join(installdir, 'dumpcap', "dumpcap_buyer.stderr"),'w'))
         except Exception,e:
             print ('Exception starting dumpcap',e,end='\r\n')
             cleanup_and_exit()
@@ -759,7 +828,6 @@ def buyer_get_sslhashes(capturefile, htmlhashes):
         #process HTML frames from last to first, because it is very likely that the last page is the page chosen by the buyer for escrow
         for index,frame in enumerate(reversed(frames)):
             print ('Processing HTML frame ' + str(index+1) + ' out of total ' + str(len(frames)) + ' frames',end='\r\n')
-            
             # "-x" dumps ascii info of the SSL frame, de-fragmenting SSL segments, decrypting them, ungzipping (if necessary) and showing plain HTML
             try:
                 ascii_dump = subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', 'frame.number==' + frame, '-x', '-o', 'ssl.keylog_file: '+sslkeylogfile])
@@ -921,6 +989,8 @@ def get_htmlhash_from_asciidump(ascii_dump):
             #Hence the workaround
             
             lines = ascii_dump[reassembled_pos:].split('\n')
+            line_length = len(lines[1])+1
+            line_numbering_length = len(lines[1].split()[0])
             hexlist = [line.split()[1:17] for line in lines[1:]]
             #flatten the nested lists acc.to http://stackoverflow.com/questions/952914/making-a-flat-list-out-of-list-of-lists-in-python
             flathexlist = [item for sublist in hexlist for item in sublist]
@@ -931,11 +1001,11 @@ def get_htmlhash_from_asciidump(ascii_dump):
             start_line_in_ascii = start_pos_in_hex/32
             line_offset_in_ascii = (start_pos_in_hex % 32)/2
                      
-            #an ascii line is 73 chars long, each hex number takes up 2 alphanum chars + 1 space char
+            #The very first hex is line numbering,it is followed by 2 spaces
+            #each hex number in a line takes up 2 alphanum chars + 1 space char
             #we skip the very first line 'Reassembled SSL ...' by finding a newline.
-            #There are 6 line number chars (including spaces) at the start of each line
             newline_offset = ascii_dump[reassembled_pos:].find('\n')
-            body_start = reassembled_pos+newline_offset+1+start_line_in_ascii*73+6+line_offset_in_ascii*3
+            body_start = reassembled_pos+newline_offset+1+start_line_in_ascii*line_length+line_numbering_length+2+line_offset_in_ascii*3
             if body_start == -1:
                 print ('Could not find HTTP body',end='\r\n')
                 cleanup_and_exit()
@@ -961,6 +1031,8 @@ def get_htmlhash_from_asciidump(ascii_dump):
             #Hence the workaround
             
             lines = ascii_dump[decrypted_pos:].split('\n')
+            line_length = len(lines[1])+1
+            line_numbering_length = len(lines[1].split()[0])
             hexlist = [line.split()[1:17] for line in lines[1:]]
             #flatten the nested lists acc.to http://stackoverflow.com/questions/952914/making-a-flat-list-out-of-list-of-lists-in-python
             flathexlist = [item for sublist in hexlist for item in sublist]
@@ -971,11 +1043,11 @@ def get_htmlhash_from_asciidump(ascii_dump):
             start_line_in_ascii = start_pos_in_hex/32
             line_offset_in_ascii = (start_pos_in_hex % 32)/2
                      
-            #an ascii line is 73 chars long, each hex number takes up 2 alphanum chars + 1 space char
+              #The very first hex is line numbering,it is followed by 2 spaces
+            #each hex number in a line takes up 2 alphanum chars + 1 space char
             #we skip the very first line 'Reassembled SSL ...' by finding a newline.
-            #There are 6 line number chars (including spaces) at the start of each line
             newline_offset = ascii_dump[decrypted_pos:].find('\n')
-            body_start = decrypted_pos+newline_offset+1+start_line_in_ascii*73+6+line_offset_in_ascii*3            
+            body_start = decrypted_pos+newline_offset+1+start_line_in_ascii*line_length+line_numbering_length+2+line_offset_in_ascii*3            
             
             if body_start == -1:
                 print ('Could not find HTTP body',end='\r\n')
@@ -1327,7 +1399,7 @@ if __name__ == "__main__":
             thread = threading.Thread(target= buyer_start_minihttp_thread)
             thread.start()
             start_firefox()
-            #wait for minihttp server shutdown. Means that user has finished the SSL session
+            #wait for minihttp server shutdown. The shutdown means that user has finished the SSL session
             while thread.isAlive():
                time.sleep(2)
             print ("User has finished the SSL session",end='\r\n')
