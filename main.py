@@ -19,25 +19,34 @@ from bitcoinrpc import authproxy
 #--------------------Begin customizable variables-------------------------------------
 
 #THIS MUST BE CHANGED to point to a escrow's server IP which is running sshd. You can use localhost for testing
-escrow_host = '' #e.g. '1.2.3.4'  NB! '127.0.0.1' may not work, use localhost instead
+escrow_ssh_host = '' #e.g. '1.2.3.4'  NB! '127.0.0.1' may not work, use localhost instead
 #the port is an arbtrary port on the escrow's server. Unless there is a port conflict, no need to change it.
-escrow_random_port = 0
+escrow_dumpcap_port = 0
+escrow_e2b_port = 1001
+escrow_e2s_port = 1002
 #an existing username and password used to connect to sshd on escrow's server. For testing you can give your username if sshd ir run locally
 escrow_ssh_user = 'username' #e.g. 'ssllog_user' 
 escrow_ssh_pass = 'password'
 escrow_ssh_port = 22
+escrow_http_host = ''
+escrow_http_port = 12344
 buyer_stunnel_accept_port = 8080
+buyer_http_port = 2222
+seller_http_port = 4445
+
+#transaction ref number that buyer has to see in his HTML
+ref_string = '2013'
 
 #ssllog_installdir is the dir from which main.py is run
-currfile = inspect.getfile(inspect.currentframe())
+currfile = inspect.getfile(inspect.currentescrow_random_portframe())
 installdir = os.path.dirname(os.path.realpath(__file__))
 
 #read some preferences from an external file
 if os.path.isfile(os.path.join(installdir,'preferences.py')):
     sys.path.append(installdir)
     import preferences
-    escrow_host = preferences.escrow_host
-    escrow_random_port = preferences.escrow_random_port
+    escrow_ssh_host = preferences.escrow_host
+    escrow_dumpcap_port = preferences.escrow_random_port
     escrow_ssh_user = preferences.escrow_ssh_user
     escrow_ssh_pass = preferences.escrow_ssh_pass
     escrow_ssh_port = preferences.escrow_ssh_port
@@ -59,11 +68,16 @@ editcap_exepath = '/usr/local/bin/editcap'
 dumpcap_exepath = '/usr/local/bin/dumpcap'
 capinfos_exepath = '/usr/local/bin/capinfos'
 mergecap_exepath = '/usr/local/bin/mergecap'
+wireshark_configdir = '/home/default2/.wireshark'
 
 #where buyer's dumpcap puts its traffic capture file
 buyer_dumpcap_capture_file= os.path.join(installdir, 'dumpcap', 'buyer_dumpcap.pcap')
 #where seller's dumpcap puts its traffic capture file
 seller_dumpcap_capture_file= os.path.join(installdir, 'dumpcap', 'seller_dumpcap.pcap')
+#where escrow's dumpcap puts its traffic capture file
+escrow_dumpcap_capture_file= os.path.join(installdir, 'dumpcap', 'escrow_dumpcap.pcap')
+#for buyer and seller: location of the escrow's trace
+escrowtrace_from_escrow = ''
 #where Firefox saves html files when user marks them
 htmldir = os.path.join(installdir,'htmldir')
 sslkeylogfile = os.path.join(installdir, 'dumpcap', 'sslkeylog')
@@ -95,7 +109,7 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
         elif self.path == '/finished':
             #ask seller to stop dumpcap first. Then continue.
             #TODO wrap this in try/except
-            response = requests.head("http://127.0.0.1:4445/stopsquid", proxies={"http":"http://127.0.0.1:"+str(buyer_stunnel_accept_port)})
+            response = requests.head("http://127.0.0.1:"+str(seller_http_port)+"/stopsquid", proxies={"http":"http://127.0.0.1:"+str(buyer_stunnel_accept_port)})
             if response.status_code != 200:
                 print ("Unable to stop squid",end='\r\n')
                 cleanup_and_exit()         
@@ -104,6 +118,18 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
             self.send_header("value", "ok")
             super(buyer_HandlerClass, self).do_HEAD()
             self.server.stop = True
+        elif self.path.startswith == '/decrypt_escrowtrace=':
+            self.send_response(200)
+            self.send_header("response", "decrypt_escrowtrace")
+            self.send_header("value", "ok")
+            super(buyer_HandlerClass, self).do_HEAD()
+            escrowtrace_path = self.path[len('/decrypt_escrowtrace='):]
+            response = send_http_request('get',escrow_http_host,escrow_http_port,escrowtrace_path)
+            escrowtrace_from_escrow = open(os.path.join(installdir,'dumpcap','escrowtrace_buyer.pcap'),'w')
+            escrowtrace_from_escrow.write(response.content)
+            escrowtrace_from_escrow.close()
+            find_ssl_in_escrowtrace()
+            
     #logging messes up the terminal, disabling
     def log_message(self, format, *args):
         return
@@ -113,6 +139,10 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
 #class "object" in needed to access super()
 class seller_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
     protocol_version = "HTTP/1.1"
+    ssl_hashes = []
+    def do_GET(self):
+        print ("Received an unexpected GET request. Please investigate",end='\r\n')
+        cleanup_and_exit()           
     def do_HEAD(self):
         print ('http server: received request '+self.path+' ',end='\r\n')
         if self.path == '/certificate':
@@ -124,6 +154,87 @@ class seller_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
             self.send_header("response", "certificate")
             self.send_header("value", base64_message)
             super(seller_HandlerClass, self).do_HEAD()            
+        elif self.path.startswith('/sslkeylogfile='):
+            print ("Received SSL keys from the buyer",end='\r\n')
+            base64_sslkeylog_str = self.path[len('/sslkeylogfile='):]
+            sslkeylog_str = base64.b64decode(base64_sslkeylog_str)
+            with open (os.path.join(installdir,'escrow','sslkeylogfile'), "w") as file:
+                file.write(sslkeylog_str)
+            self.send_response(200)
+            self.send_header("response", "sslkeylogfile")
+            self.send_header("value", "ok")
+            super(seller_HandlerClass, self).do_HEAD()
+        elif self.path.startswith('/hashes='):
+            print ("Received hashes of SSL segments from the escrow",end='\r\n')
+            self.ssl_hashes = self.path[len('/hashes='):].split(';')[1:]
+            self.send_response(200)
+            self.send_header("response", "hashes")
+            self.send_header("value", "ok")
+            super(seller_HandlerClass, self).do_HEAD()
+            is_found = seller_check_hashes_present(self.ssl_hashes)
+            #send search result to the escr0w
+            escrow_contacted = False
+            for i in range(10):
+                try:
+                    response = requests.head("http://"+escrow_http_host+":"+str(escrow_http_port)+"/sellersearchresult="+ "true" if is_found else "false")
+                    escrow_contacted = True
+                    break
+                except Exception,e:
+                    print ('Sleeping ' + str(i+1) + ' sec while trying to connect to the escrow',end='\r\n')
+                    time.sleep(1)
+            if not escrow_contacted:
+                print ("Can't connect to the escrow",end='\r\n')
+                cleanup_and_exit()  
+            elif message.status_code != 200:
+                print ("Unable to send search result to the escrow",end='\r\n')
+                cleanup_and_exit()
+            
+            #receiving "hashes=" message is a signal to stop this server and continue in the main thread with parsing the hashes
+            #self.server.stop = True
+        elif self.path.startswith('/stopsquid'):
+            #TODO actually stop squid before responding
+            self.send_response(200)
+            self.send_header("response", "stopsquid")
+            self.send_header("value", "ok")
+            super(seller_HandlerClass, self).do_HEAD()
+            
+        elif self.path.startswith == '/decrypt_escrowtrace=':
+            self.send_response(200)
+            self.send_header("response", "decrypt_escrowtrace")
+            self.send_header("value", "ok")
+            super(buyer_HandlerClass, self).do_HEAD()
+            escrowtrace_path = self.path[len('/decrypt_escrowtrace='):]
+            response = send_http_request('get',escrow_http_host,escrow_http_port,escrowtrace_path)
+            escrowtrace_from_escrow = open(os.path.join(installdir,'dumpcap','escrowtrace_seller.pcap'),'w')
+            escrowtrace_from_escrow.write(response.content)
+            escrowtrace_from_escrow.close()
+            find_ssl_in_escrowtrace()
+            
+    #logging messes up the terminal, disabling
+    #def log_message(self, format, *args):
+        #return
+    
+#handle only paths we are interested and let python handle the response headers
+#class "object" in needed to access super()
+class escrow_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
+    protocol_version = "HTTP/1.0"
+    buyerhashes = []
+    def do_GET(self):
+        super(escrow_HandlerClass, self).do_GET()
+    def do_HEAD(self):
+        print ('http server: received request '+self.path+' ',end='\r\n')
+        if self.path == '/buyerhashes':
+            print ("Buyer has submtted SSL hashes",end='\r\n')
+            hashes_str = self.path[len('/hashes='):]
+            self.buyerhashes = hashes_str.split(';')[1:]
+            self.send_response(200)
+            self.send_header("response", "buyerhashes")
+            self.send_header("value", "ok")
+            super(seller_HandlerClass, self).do_HEAD()
+            #send hashes to the seller
+            send_http_request('127.0.0.1', escrow_e2s_port, "/hashes"+hashes_str)
+            
+                  
         if self.path.startswith('/sslkeylogfile='):
             print ("Received SSL keys from the buyer",end='\r\n')
             base64_sslkeylog_str = self.path[len('/sslkeylogfile='):]
@@ -134,25 +245,38 @@ class seller_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
             self.send_header("response", "sslkeylogfile")
             self.send_header("value", "ok")
             super(seller_HandlerClass, self).do_HEAD()
-        if self.path.startswith('/hashes='):
-            print ("Received hashes of SSL segments from the buyer",end='\r\n')
-            self.server.retval = self.path[len('/hashes='):]
+        if self.path.startswith('/sellersearchresult='):
+            print ("Received search result from seller ",end='\r\n')
+            result = self.path[len('/sellersearchresult='):]     
             self.send_response(200)
-            self.send_header("response", "hashes")
+            self.send_header("response", "sellersearchresult")
             self.send_header("value", "ok")
             super(seller_HandlerClass, self).do_HEAD()
-            #receiving "hashes=" message is a signal to stop this server and continue in the main thread with parsing the hashes
-            self.server.stop = True
+            if result == 'false':
+                #give buyer and seller a link to escrowtrace
+                try:
+                    os.kill(pid['dumpcap'], signal.SIGTERM)
+                except Exception,e:
+                    print ('Exception while killing dumpcap', e,end='\r\n')
+                    cleanup_and_exit()
+                #TODO find a more reliable way to know that dumpcap finished writing into the pcap file
+                time.sleep(1)
+                #these imports are only needed for escrow
+                import random
+                import string
+                randomname = ''.join(random.choice(string.ascii_lowercase) for x in range(8))
+                shutil.copy(escrow_dumpcap_capture_file, os.path.join(installdir,'tempdir',randomname))    
+                
+                send_http_request('127.0.0.1', escrow_e2b_port, "/decrypt_escrowtrace="+"/tempdir"+randomname)
+                send_http_request('127.0.0.1', escrow_e2s_port, "/decrypt_escrowtrace="+"/tempdir"+randomname)
+           
         if self.path.startswith('/stopsquid'):
             #TODO actually stop squid before responding
             self.send_response(200)
             self.send_header("response", "stopsquid")
             self.send_header("value", "ok")
             super(seller_HandlerClass, self).do_HEAD()
-            
-    #logging messes up the terminal, disabling
-    def log_message(self, format, *args):
-        return
+
                 
 class StoppableHttpServer (BaseHTTPServer.HTTPServer):
     """http server that reacts to self.stop flag"""
@@ -170,27 +294,33 @@ class ThreadWithRetval(threading.Thread):
 class HTTPFinishedException(Exception):
     pass
  
+
+def find_ssl_in_escrowtrace():
+    
+    
+    
+
             
 #send all the hashes in an HTTP HEAD request    
 def buyer_send_sslhashes(sslhashes):
-    print ("Sending hashes of SSL segments to the seller",end='\r\n')
+    print ("Sending hashes of SSL segments to the escrow",end='\r\n')
     hashes_string = ''
     for hash in sslhashes:
         hashes_string += ';'+hash
-    seller_contacted = False
+    escrow_contacted = False
     for i in range(10):
         try:
-            message = requests.head("http://127.0.0.1:4445/hashes="+hashes_string, proxies={"http":"http://127.0.0.1:"+str(buyer_stunnel_accept_port)})
-            seller_contacted = True
+            message = requests.head("http://"+escrow_http_host+":"+str(escrow_http_port)+"/buyerhashes="+hashes_string)
+            escrow_contacted = True
             break
         except Exception,e:
-            print ('Sleeping ' + str(i+1) + ' sec while trying to connect to the seller',end='\r\n')
+            print ('Sleeping ' + str(i+1) + ' sec while trying to connect to the escrow',end='\r\n')
             time.sleep(1)
-    if not seller_contacted:
-        print ("Can't connect to the seller",end='\r\n')
+    if not escrow_contacted:
+        print ("Can't connect to the escrow",end='\r\n')
         cleanup_and_exit()  
     elif message.status_code != 200:
-        print ("Unable to send SSL hashes to the seller",end='\r\n')
+        print ("Unable to send SSL hashes to the escrow",end='\r\n')
         cleanup_and_exit()
 
 #send sslkeylog to escrow. For testing purposes we can send it to seller.
@@ -444,11 +574,15 @@ def send_logs_to_escrow(ssl_hashes):
         
 
 #the return value will be placed into HTTP header and sent to buyer. Python has a 64K limit on header size
+#NB. seller sends his stunnel.key to be used after the banking session is over to decrypt escrowtrace
 def seller_get_certificate_verify_message():
-    print ("Preparing and sending the certificate together with a signature to the buyer",end='\r\n')
+    print ("Preparing and sending the certificate+key together with a signature to the buyer",end='\r\n')
     with open (os.path.join(installdir, "stunnel", "seller.pem"), "r") as certfile:
         certdata = certfile.read()
     certificate = certdata.__str__()
+    with open (os.path.join(installdir, "stunnel", "seller.key"), "r") as keyfile:
+        keydata = keyfile.read()
+    key = keydata.__str__()
     #bitcond needs about 10 sec to initialize an empty dir when launched for the first time
     #check if it is finished initializing and is ready for queries. Try 4 times with an interval of 5 sec
     for i in range(4):
@@ -473,11 +607,12 @@ def seller_get_certificate_verify_message():
         print ("Error while invoking getaccountaddress", e,end='\r\n')
         cleanup_and_exit()
     try:
-        signature = seller_bitcoin_rpc.signmessage(seller_btc_address, certificate)
+        cert_signature = seller_bitcoin_rpc.signmessage(seller_btc_address, certificate)
+        key_signature = seller_bitcoin_rpc.signmessage(seller_btc_address, key)
     except Exception, e:
         print ("Error while invoking signmessage. Did you indicate a valid BTC address?", e,end='\r\n')
         cleanup_and_exit()
-    return signature + ';' + certificate + ':' + seller_btc_address    
+    return key + ';' + key_signature + ';' + certificate + ';' + cert_signature + ';' + seller_btc_address    
 
 def seller_start_bitcoind_stunnel_sshpass_dumpcap_squid(skip_capture):
     global pids
@@ -494,15 +629,13 @@ def seller_start_bitcoind_stunnel_sshpass_dumpcap_squid(skip_capture):
         
         print ("Starting ssh connection to escrow's server",end='\r\n')
         try:
-            sshpass_proc = subprocess.Popen([sshpass_exepath, '-p', escrow_ssh_pass, ssh_exepath, escrow_ssh_user+'@'+escrow_host, '-p', str(escrow_ssh_port), '-R', str(escrow_random_port)+':localhost:33310'], stdout=open(os.path.join(installdir, 'ssh', "ssh_seller.stdout"),'w'), stderr=open(os.path.join(installdir, 'ssh', "ssh_seller.stderr"),'w'))
+            sshpass_proc = subprocess.Popen([sshpass_exepath, '-p', escrow_ssh_pass, ssh_exepath, escrow_ssh_user+'@'+escrow_ssh_host, '-p', str(escrow_ssh_port), '-R', str(escrow_dumpcap_port)+':localhost:33310'], stdout=open(os.path.join(installdir, 'ssh', "ssh_seller.stdout"),'w'), stderr=open(os.path.join(installdir, 'ssh', "ssh_seller.stderr"),'w'))
         except:
             print ('Exception connecting to sshd',end='\r\n')
             cleanup_and_exit()
         pids['sshpass']  = sshpass_proc.pid
     
     print ("Starting stunnel",end='\r\n')
-    #stunnel finds paths in .conf relative to working dir
-    os.chdir(os.path.join(installdir,'stunnel'))
     try:
         stunnel_proc = subprocess.Popen([stunnel_exepath, os.path.join(installdir, 'stunnel', 'seller.conf')], cwd=os.path.join(installdir, 'stunnel'), stdout=open(os.path.join(installdir, 'stunnel', 'stunnel_seller.stdout'),'w'), stderr=open(os.path.join(installdir, 'stunnel', 'stunnel_seller.stderr'),'w'))
     except:
@@ -551,7 +684,7 @@ def buyer_get_and_verify_seller_cert():
     seller_contacted = False
     for i in range(10):
         try:
-            response = requests.head("http://127.0.0.1:4445/certificate", proxies={"http":"http://127.0.0.1:"+str(buyer_stunnel_accept_port)})
+            response = requests.head("http://127.0.0.1:"+str(seller_http_port)+"/certificate", proxies={"http":"http://127.0.0.1:"+str(buyer_stunnel_accept_port)})
             seller_contacted = True
             break
         except Exception,e:
@@ -565,9 +698,12 @@ def buyer_get_and_verify_seller_cert():
         cleanup_and_exit()
     base64_message = response.headers['value']
     message = base64.b64decode(base64_message)
-    signature = message[:message.find(";")]
-    certificate = message[message.find(";")+1:message.find(":")]
-    seller_btc_address = message[message.find(":")+1:]
+    items = message.split(';')
+    key = items[0]
+    key_sig =items[1]
+    cert = items[2]
+    cert_sig = items[3]
+    seller_btc_address = items[4]
     
     print ("Verifying seller's certificate with bitcoind",end='\r\n')
     #bitcond needs about 10 sec to initialize an empty dir when launched for the first time
@@ -586,8 +722,11 @@ def buyer_get_and_verify_seller_cert():
                 
     print ("Verifying seller's certificate for stunnel",end='\r\n')
     try:
-        if buyer_bitcoin_rpc.verifymessage(seller_btc_address, signature, certificate) != True :
+        if buyer_bitcoin_rpc.verifymessage(seller_btc_address, cert_sig, cert) != True :
             print ("Failed to verify seller's certificate",end='\r\n')
+            cleanup_and_exit()
+        if buyer_bitcoin_rpc.verifymessage(seller_btc_address, key_sig, key) != True :
+            print ("Failed to verify seller's key",end='\r\n')
             cleanup_and_exit()
     except Exception,e:
         print ('Exception while calling verifymessage',e,end='\r\n')
@@ -595,7 +734,9 @@ def buyer_get_and_verify_seller_cert():
     
     print ('Successfully verified sellers certificate, writing it to disk',end='\r\n')
     with open (os.path.join(installdir, "stunnel","verifiedcert.pem"), "w") as certfile:
-        certfile.write(certificate)
+        certfile.write(cert)
+    with open (os.path.join(installdir, "stunnel","buyer_stunnel.key"), "w") as keyfile:
+        keyfile.write(key)
         
     
 
@@ -616,7 +757,7 @@ def buyer_start_bitcoind_stunnel_sshpass_dumpcap(skip_capture):
     
     print ('Starting ssh connection',end='\r\n')
     try:
-        sshpass_proc = subprocess.Popen([sshpass_exepath, '-p', escrow_ssh_pass, ssh_exepath, escrow_ssh_user+'@'+escrow_host, '-p', str(escrow_ssh_port), '-L', '33309:localhost:'+str(escrow_random_port)], stdout=open(os.path.join(installdir, 'ssh','ssh_buyer.stdout'),'w'),  stderr=open(os.path.join(installdir, 'ssh','ssh_buyer.stderr'),'w'))
+        sshpass_proc = subprocess.Popen([sshpass_exepath, '-p', escrow_ssh_pass, ssh_exepath, escrow_ssh_user+'@'+escrow_ssh_host, '-p', str(escrow_ssh_port), '-L', '33309:localhost:'+str(escrow_dumpcap_port)], stdout=open(os.path.join(installdir, 'ssh','ssh_buyer.stdout'),'w'),  stderr=open(os.path.join(installdir, 'ssh','ssh_buyer.stderr'),'w'))
     except:
         print ('Exception connecting to sshd',end='\r\n')
         cleanup_and_exit()
@@ -683,7 +824,7 @@ def buyer_start_bitcoind_stunnel_sshpass_dumpcap(skip_capture):
 def buyer_start_minihttp_thread():
     print ('Starting mini http server to communicate with Firefox plugin',end='\r\n')
     try:
-        httpd = StoppableHttpServer(('127.0.0.1', 2222), buyer_HandlerClass)
+        httpd = StoppableHttpServer(('127.0.0.1', buyer_http_port), buyer_HandlerClass)
     except Exception, e:
         print ('Error starting mini http server', e,end='\r\n')
         cleanup_and_exit()
@@ -695,7 +836,8 @@ def buyer_start_minihttp_thread():
 def seller_start_minihttp_thread(retval):
     print ("Starting mini http server and waiting for buyer's queries",end='\r\n')
     try:
-        httpd = StoppableHttpServer(('127.0.0.1', 4445), seller_HandlerClass)
+        #don't forget to change host from 0.0.0.0 to 127.0.0.1
+        httpd = StoppableHttpServer(('0.0.0.0', seller_http_port), seller_HandlerClass)
     except Exception, e:
         print ('Error starting mini http server', e,end='\r\n')
         cleanup_and_exit()
@@ -706,6 +848,19 @@ def seller_start_minihttp_thread(retval):
     #pass retval down to the thread instance
     retval.append(sslhashes)
     
+def escrow_start_minihttp_thread(retval):
+    print ("Starting mini http server and waiting for buyer's response",end='\r\n')
+    try:
+        httpd = StoppableHttpServer(('127.0.0.1', 7777), escrow_HandlerClass)
+    except Exception, e:
+        print ('Error starting mini http server', e,end='\r\n')
+        cleanup_and_exit()
+    sa = httpd.socket.getsockname()
+    print ("Serving HTTP on", sa[0], "port", sa[1], "...",end='\r\n')
+    sslhashes = httpd.serve_forever()
+    #pass retval down to the thread instance
+    #retval.append(sslhashes)
+    
 def start_firefox():
     #we could ask user to run Firefox with -ProfileManager and create a new profile themselves
     #but to be as user-friendly as possible, we add a new Firefox profile behind the scenes
@@ -715,7 +870,7 @@ def start_firefox():
         print ("Couldn't find user's home directory",end='\r\n')
         cleanup_and_exit()
     #todo allow user to specify firefox profile dir manually 
-    ff_user_dir = os.path.join(homedir, ".mozilla", "firefox")   
+    ff_user_dir = os.path.join(homedir, ".mozilla", "firtsefox")   
     # skip this step if "ssllog" profile already exists
     if (not os.path.isdir(os.path.join(ff_user_dir, "ssllog_profile"))):
         print ("Copying plugin files into Firefox's plugin directory",end='\r\n')
@@ -794,146 +949,150 @@ def start_firefox():
     
 
 #the tempdir contains html files as well as folders with js,png,css. Ignore the folders
-def buyer_get_htmlhashes():
-    print ("Hashing the saved html file",end='\r\n')
+def buyer_find_htmlframe(reference_string):
+    print ("Finding and hashing any saved html files",end='\r\n')
     onlyfiles = [f for f in os.listdir(htmldir) if os.path.isfile(os.path.join(htmldir,f))]
-    if len(onlyfiles) == 0:
-        print ('No HTML files have been found in htmldir',end='\r\n')
-        cleanup_and_exit()
     htmlhashes = []
-    for file in onlyfiles:
-        htmlhashes.append(hashlib.md5(open(os.path.join(htmldir, file), 'r').read()).hexdigest())
-    return htmlhashes
+    if len(onlyfiles) != 0:
+        for file in onlyfiles:
+            htmlhashes.append(hashlib.md5(open(os.path.join(htmldir, file), 'r').read()).hexdigest())
+    else: 
+        print ('No HTML files have been found in htmldir',end='\r\n')
+    
+    #Look for the reference string in decrypted HTML
 
-#Find the frame which contains the html hash and return the frame's SSL part hash
-def buyer_get_sslhashes(capturefile, htmlhashes):
+    #get frame numbers of all non-empty html responses that came from the bank (ignore codes such as 204:No Content, 302:Found, 304:Not Modified, because there is no useful html in them )
+    try:
+        frames_str = subprocess.check_output([tshark_exepath, '-r', buyer_dumpcap_capture_file, '-Y', 'ssl and http.content_type contains html  and http.response.code == 200', '-T', 'fields', '-e', 'frame.number', '-o', 'ssl.keylog_file: '+sslkeylogfile])
+    except Exception,e:
+        print ('Error starting tshark', e,end='\r\n')
+        cleanup_and_exit()
+    frames_str = frames_str.rstrip()
+    frames = frames_str.split('\n')
+    if frames == ['']:
+        print ('No HTML pages found in the capture file',end='\r\n')
+        cleanup_and_exit()
+        
+    found_frame = 0
+    #process HTML frames from last to first, because it is very likely that the last page is the page chosen by the buyer for escrow
+    for index,frame in enumerate(reversed(frames)):
+        print ('Processing HTML frame ' + str(index+1) + ' out of total ' + str(len(frames)) + ' frames',end='\r\n')
+        # "-x" dumps ascii info of the SSL frame, de-fragmenting SSL segments, decrypting them, ungzipping (if necessary) and showing plain HTML
+        try:
+            ascii_dump = subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', 'frame.number==' + frame, '-x', '-o', 'ssl.keylog_file: '+sslkeylogfile])
+        except Exception,e:
+            print ('Error starting tshark', e,end='\r\n')
+            cleanup_and_exit()
+        html_binary = get_htmlhash_from_asciidump(ascii_dump)
+        if html_binary == 0:
+            print ("Expected to find HTML, but none found in frame " + str(frame) + " Please investigate",end='\r\n')
+            continue        
+        if html_binary.lower().find(reference_string.lower()) != -1:        
+            found_frame = frame
+            print ("found HTML containing reference string in frame No " + frame,end='\r\n')
+            #for statistics
+            if len(htmlhashes)>0:
+                if htmlhashes[0] == hashlib.md5(binary_html).hexdigest():
+                    print ('HTML saved by Firefox and HTML found in the tracefile matched!',end='\r\n')
+            break       
+    if not found_frame:            
+        print ("Couldn't find HTML containing reference string ",end='\r\n')
+        return 0
+        
+    return found_frame
+
+#return the hashes of HTML-forming SSL-segments
+def buyer_get_sslhashes(capturefile, html_frame):
     sslhashes = []
-    for htmlhash in htmlhashes:
-        if htmlhash == '':
-            print ('empty hash provided. Please investigate',end='\r\n')
-            cleanup_and_exit()
-        #get frame numbers of all non-empty html responses that came from the bank (ignore codes such as 204:No Content, 302:Found, 304:Not Modified, because there is no useful html in them )
-        try:
-            frames_str = subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', 'ssl and http.content_type contains html  and http.response.code == 200', '-T', 'fields', '-e', 'frame.number', '-o', 'ssl.keylog_file: '+sslkeylogfile])
-        except Exception,e:
-            print ('Error starting tshark', e,end='\r\n')
-            cleanup_and_exit()
-        frames_str = frames_str.rstrip()
-        frames = frames_str.split('\n')
-        if frames == ['']:
-            print ('No HTML pages found in the capture file',end='\r\n')
-            cleanup_and_exit()
-        print ("Finding SSL segments corresponding to the saved html files",end='\r\n')
-        found_frame = 0
-        #process HTML frames from last to first, because it is very likely that the last page is the page chosen by the buyer for escrow
-        for index,frame in enumerate(reversed(frames)):
-            print ('Processing HTML frame ' + str(index+1) + ' out of total ' + str(len(frames)) + ' frames',end='\r\n')
-            # "-x" dumps ascii info of the SSL frame, de-fragmenting SSL segments, decrypting them, ungzipping (if necessary) and showing plain HTML
-            try:
-                ascii_dump = subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', 'frame.number==' + frame, '-x', '-o', 'ssl.keylog_file: '+sslkeylogfile])
-            except Exception,e:
-                print ('Error starting tshark', e,end='\r\n')
+             
+    #collect other possible SSL segments which are part of HTML page. 
+    segments = [html_frame]
+    try:
+        segments_str =  subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', 'frame.number==' + html_frame, '-T', 'fields', '-e', 'ssl.segment', '-o', 'ssl.keylog_file: '+sslkeylogfile])
+    except Exception, e:
+        print ('Error starting tshark', e,end='\r\n')
+        cleanup_and_exit()
+    segments_str = segments_str.rstrip()
+    if segments_str != '':
+        segments += segments_str.split(',')
+    if len(segments) < 1:
+        print ('zero SSL segments, should be at least one. Please investigate',end='\r\n')
+        cleanup_and_exit()
+    #there can be multiple SSL segments in the same packet, so remove duplicates
+    segments = list(set(segments))
+      
+    #sanity check: the whole scheme hinges on the assumption that all the found SSL segments belong to the same TCP stream
+    tshark_arg = 'frame.number=='+segments[0]
+    for segment in segments[1:]:
+        tshark_arg += ' or frame.number=='+segment
+    try:
+        tcpstreams_str =  subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', tshark_arg, '-T', 'fields', '-e', 'tcp.stream'])
+    except Exception,e:
+        print ('Error starting tshark',e,end='\r\n')
+        cleanup_and_exit()
+    tcpstreams_str = tcpstreams_str.rstrip()
+    tcpstreams = tcpstreams_str.split('\n')
+    #the amount of elements with the value of element [0] should be equal to the size of list
+    if tcpstreams.count(tcpstreams[0]) != len(tcpstreams):
+        print ("A very serious issue encountered. Not all SSL segments belong to the same TCP stream. Please contact the developers",end='\r\n')
+        cleanup_and_exit()
+        
+    print ('Extracting hex data from ' + str(len(segments)) + ' SSL segments',end='\r\n')
+    frame_argument = 'frame.number=='+segments[0]
+    for segment in sorted(segments[1:]):
+        frame_argument += ' or frame.number==' + segment            
+    try:
+        frames_ssl_hex = subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', frame_argument, '-T', 'fields', '-e', 'ssl.app_data'])
+    except Exception,e:
+        print ('Error starting tshark',e,end='\r\n')
+        cleanup_and_exit()
+    frames_ssl_hex = frames_ssl_hex.rstrip()
+    frames_ssl_hex = frames_ssl_hex.split('\n')
+    for frame_hex in frames_ssl_hex:
+        #(ssl.app_data comma-delimits multiple SSL segments within the same frame)
+        frame_segments = frame_hex.split(',')
+        for one_segment in frame_segments:
+            #get rid of commas and colons
+            one_segment = one_segment.replace(':',' ')
+            if one_segment == ' ':
+                print ('empty frame hex. Please investigate',end='\r\n')
                 cleanup_and_exit()
-            md5hash = get_htmlhash_from_asciidump(ascii_dump)
-            if md5hash == 0:
-                print ("Expected to find HTML, but none found in frame " + str(frame) + " Please investigate",end='\r\n')
-                continue
-            if htmlhash == md5hash:
-                found_frame = frame
-                print ("found matching SSL segment in frame No " + frame,end='\r\n')
-                break
-        if not found_frame:            
-            print ("Couldn't find an SSL segment containing html hash provided",end='\r\n')
-            return 0
+            sslhashes.append(hashlib.md5(bytearray.fromhex(one_segment)).hexdigest())
+    return sslhashes
             
-        #collect other possible SSL segments which are part of HTML page. 
-        segments = [found_frame]
-        try:
-            segments_str =  subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', 'frame.number==' + found_frame, '-T', 'fields', '-e', 'ssl.segment', '-o', 'ssl.keylog_file: '+sslkeylogfile])
-        except Exception, e:
-            print ('Error starting tshark', e,end='\r\n')
-            cleanup_and_exit()
-        segments_str = segments_str.rstrip()
-        if segments_str != '':
-            segments += segments_str.split(',')
-        if len(segments) < 1:
-            print ('zero SSL segments, should be at least one. Please investigate',end='\r\n')
-            cleanup_and_exit()
-        #there can be multiple SSL segments in the same packet, so remove duplicates
-        segments = list(set(segments))
-        
-        
-        #sanity check: the whole scheme hinges on the assumption that all the found SSL segments belong to the same TCP stream
-        tshark_arg = 'frame.number=='+segments[0]
-        for segment in segments[1:]:
-            tshark_arg += ' or frame.number=='+segment
-        try:
-            tcpstreams_str =  subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', tshark_arg, '-T', 'fields', '-e', 'tcp.stream'])
-        except Exception,e:
-            print ('Error starting tshark',e,end='\r\n')
-            cleanup_and_exit()
-        tcpstreams_str = tcpstreams_str.rstrip()
-        tcpstreams = tcpstreams_str.split('\n')
-        #the amount of elements with the value of element [0] should be equal to the size of list
-        if tcpstreams.count(tcpstreams[0]) != len(tcpstreams):
-            print ("A very serious issue encountered. Not all SSL segments belong to the same TCP stream. Please contact the developers",end='\r\n')
-            cleanup_and_exit()
-            
-        print ('Extracting hex data from ' + str(len(segments)) + ' SSL segments',end='\r\n')
-        frame_argument = 'frame.number=='+segments[0]
-        for segment in sorted(segments[1:]):
-            frame_argument += ' or frame.number==' + segment            
-        try:
-            frames_ssl_hex = subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', frame_argument, '-T', 'fields', '-e', 'ssl.app_data'])
-        except Exception,e:
-            print ('Error starting tshark',e,end='\r\n')
-            cleanup_and_exit()
-        frames_ssl_hex = frames_ssl_hex.rstrip()
-        frames_ssl_hex = frames_ssl_hex.split('\n')
-        for frame_hex in frames_ssl_hex:
-            #(ssl.app_data comma-delimits multiple SSL segments within the same frame)
-            frame_segments = frame_hex.split(',')
-            for one_segment in frame_segments:
-                #get rid of commas and colons
-                one_segment = one_segment.replace(':',' ')
-                if one_segment == ' ':
-                    print ('empty frame hex. Please investigate',end='\r\n')
-                    cleanup_and_exit()
-                sslhashes.append(hashlib.md5(bytearray.fromhex(one_segment)).hexdigest())
-                
-                                         
-        # For good measure instruct the seller to remove any packets containing HTTP POST requests
-        # This way we guarantee that no login credentials will ever get accidentally submitted to escrow
-        #Don't remove POSTs which follow the found SSL frame, because the seller will cut off everything following the found SSL frame anyway
-        try:
-            post_requests_str = subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', 'ssl and tcp.stream=='+tcpstreams[0]+' and http.request.method==POST and frame.number<'+found_frame, '-T', 'fields', '-e', 'frame.number'])
-        except Exception,e:
-            print ('Error starting tshark',e,end='\r\n')
-            cleanup_and_exit()
-        post_requests_str = post_requests_str.rstrip()
-        post_requests = post_requests_str.split('\n')
-        if post_requests != ['']:
-            print ('Found a POST request. Making sure the seller will remove it',end='\r\n')
-            sslhashes.append('POST')
-            for request in post_requests:
-                try:
-                    frames_ssl_hex = subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', 'frame.number=='+request, '-T', 'fields', '-e', 'ssl.app_data'])
-                except Exception,e:
-                    print ('Error starting tshark',e,end='\r\n')
-                    cleanup_and_exit()
-                frames_ssl_hex = frames_ssl_hex.rstrip()
-                frames_ssl_hex = frames_ssl_hex.split('\n')
-                for frame_hex in frames_ssl_hex:
-                    #(ssl.app_data comma-delimits multiple SSL segments within the same frame)
-                    frame_segments = frame_hex.split(',')
-                    for one_segment in frame_segments:
-                        #get rid of colons
-                        one_segment = one_segment.replace(':',' ')
-                        if one_segment == ' ':
-                            print ('empty frame hex. Please investigate',end='\r\n')
-                            cleanup_and_exit()
-                        sslhashes.append(hashlib.md5(bytearray.fromhex(one_segment)).hexdigest())
-                                
+                                     
+    # For good measure instruct the seller to remove any packets containing HTTP POST requests
+    # This way we guarantee that no login credentials will ever get accidentally submitted to escrow
+    #Don't remove POSTs which follow the found SSL frame, because the seller will cut off everything following the found SSL frame anyway
+    try:
+        post_requests_str = subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', 'ssl and tcp.stream=='+tcpstreams[0]+' and http.request.method==POST and frame.number<'+found_frame, '-T', 'fields', '-e', 'frame.number'])
+    except Exception,e:
+        print ('Error starting tshark',e,end='\r\n')
+        cleanup_and_exit()
+    post_requests_str = post_requests_str.rstrip()
+    post_requests = post_requests_str.split('\n')
+    if post_requests != ['']:
+        print ('Found a POST request. Making sure the seller will remove it',end='\r\n')
+        sslhashes.append('POST')
+        for request in post_requests:
+            try:
+                frames_ssl_hex = subprocess.check_output([tshark_exepath, '-r', capturefile, '-Y', 'frame.number=='+request, '-T', 'fields', '-e', 'ssl.app_data'])
+            except Exception,e:
+                print ('Error starting tshark',e,end='\r\n')
+                cleanup_and_exit()
+            frames_ssl_hex = frames_ssl_hex.rstrip()
+            frames_ssl_hex = frames_ssl_hex.split('\n')
+            for frame_hex in frames_ssl_hex:
+                #(ssl.app_data comma-delimits multiple SSL segments within the same frame)
+                frame_segments = frame_hex.split(',')
+                for one_segment in frame_segments:
+                    #get rid of colons
+                    one_segment = one_segment.replace(':',' ')
+                    if one_segment == ' ':
+                        print ('empty frame hex. Please investigate',end='\r\n')
+                        cleanup_and_exit()
+                    sslhashes.append(hashlib.md5(bytearray.fromhex(one_segment)).hexdigest())
+                            
     #The buyer has to process the capture file just like the seller will
     #The buyer has to ensure that HTML is readable and any POSTs are not present   
     return sslhashes
@@ -1125,7 +1284,7 @@ def get_htmlhash_from_asciidump(ascii_dump):
     #and '\r'   with '\n'
     binary_html2 = binary_html.replace('\r\n','\n')
     binary_html3 = binary_html2.replace('\r','\n')
-    return hashlib.md5(binary_html3).hexdigest()
+    return binary_html3
    
 def rearrange_outoforder_frames(capture_file):
 #This function analyzes a wireshark capture searching for a pattern of out-of-order frames
@@ -1312,7 +1471,7 @@ def rearrange_outoforder_frames(capture_file):
     print ('Total times succeeded to rearrange ' + str(rearrange_success_count),end='\r\n')
     return new_capture_file
     
-def create_directories_buyer():
+def buyer_create_directories():
     if os.path.isdir(os.path.join(installdir, 'bitcoind')) == False:
         os.makedirs(os.path.join(installdir, 'bitcoind'))
     if os.path.isdir(os.path.join(installdir, 'bitcoind', 'datadir_buyer')) == False:
@@ -1331,7 +1490,7 @@ def create_directories_buyer():
         os.makedirs(os.path.join(installdir, 'htmldir'))
             
     
-def create_directories_seller():
+def seller_create_directories():
     if os.path.isdir(os.path.join(installdir, 'bitcoind')) == False:
         os.makedirs(os.path.join(installdir, 'bitcoind'))
     if os.path.isdir(os.path.join(installdir, 'bitcoind', 'datadir_seller')) == False:
@@ -1342,7 +1501,83 @@ def create_directories_seller():
         
     if os.path.isdir(os.path.join(installdir, 'dumpcap')) == False:
         os.makedirs(os.path.join(installdir, 'dumpcap'))
-           
+
+#Establish a channel via which escrow can send requests to buyer   
+def buyer_establish_e2b_channel():
+    print ('Establishing ssh channel from escrow to buyer',end='\r\n')
+    try:
+        sshpass_proc = subprocess.Popen([sshpass_exepath, '-p', escrow_ssh_pass, ssh_exepath, escrow_ssh_user+'@'+escrow_ssh_host, '-p', str(escrow_ssh_port), '-R', str(escrow_e2b_port)+':localhost:'+str(buyer_http_port)], stdout=open(os.path.join(installdir, 'ssh','ssh_e2b_buyer.stdout'),'w'),  stderr=open(os.path.join(installdir, 'ssh','ssh_e2b_buyer.stderr'),'w'))
+    except:
+        print ('Exception connecting to sshd',end='\r\n')
+        cleanup_and_exit()
+    pids['sshpass'] = sshpass_proc.pid
+    
+def seller_establish_e2s_channel():
+    print ('Establishing ssh channel from escrow to seller',end='\r\n')
+    try:
+        sshpass_proc = subprocess.Popen([sshpass_exepath, '-p', escrow_ssh_pass, ssh_exepath, escrow_ssh_user+'@'+escrow_ssh_host, '-p', str(escrow_ssh_port), '-R', str(escrow_e2s_port)+':localhost:'+str(seller_http_port)], stdout=open(os.path.join(installdir, 'ssh','ssh_e2s_seller.stdout'),'w'),  stderr=open(os.path.join(installdir, 'ssh','ssh_e2s_seller.stderr'),'w'))
+    except:
+        print ('Exception connecting to sshd',end='\r\n')
+        cleanup_and_exit()
+    pids['sshpass'] = sshpass_proc.pid
+    
+#get hashes of all SSL segments           
+def seller_check_hashes_present(buyer_hashes):
+    seller_hashes = []
+    try:
+        sslappdata_str = subprocess.check_output([tshark_exepath, '-r', seller_dumpcap_capture_file, '-Y', 'ssl,app_data' '-T', 'fields', '-e', 'ssl,app_data'])
+    except Exception,e:
+        print ('Error starting tshark', e,end='\r\n')
+        cleanup_and_exit()
+    sslappdata_str = sslappdata_str.rstrip()
+    sslappdata = sslappdata_str.split(',')
+    print ('Generatin hashes of '+str(len(sslappdata))+' SSL frames', end='\r\n')
+    for segment in sslappdata:
+        segment.replace(':',' ')
+        seller_hashes.append(hashlib.md5(bytearray.fromhex(segment)).hexdigest())
+    for buyer_hash in buyer_hashes:
+        if seller_hashes.count(buyer_hash) != 1:            
+            print ('Seller could not find all buyer hashes',end='\r\n')
+            return False
+    print ('Seller successfully found all buyer hashes',end='\r\n')
+    return True
+
+def send_http_request(request='head', host, port, data, destnation=''):
+    destination_contacted = False
+    if request == 'head':
+        requests_cmd = requests.head
+    elif request == 'get':
+        requests_cmd = requests.get
+    else:
+        print ("Invalid request argument",end='\r\n')
+        cleanup_and_exit()  
+    for i in range(10):
+        try:
+            response = requests_cmd(host+":"+str(port)+data)
+            destination_contacted = True
+            break
+        except Exception,e:
+            print ('Sleeping ' + str(i+1) + ' sec while trying to connect',end='\r\n')
+            time.sleep(1)
+    if not destination_contacted:
+        print ("Can't connect to the destination",end='\r\n')
+        cleanup_and_exit()  
+    elif message.status_code != 200:
+        print ("Destination returned invalid HTTP response",end='\r\n')
+        cleanup_and_exit()
+    return response
+        
+def escrow_start_dumpcap():
+    print ('Starting dumpcap in capture mode',end='\r\n')
+    try:
+        #todo: don't assume that 'lo' is the loopback, query it
+        #listen on the port which bridges buyer's and seller's ssh. filter out all the rest of loopback traffic
+        dumpcap_proc = subprocess.Popen([dumpcap_exepath, '-i', 'lo', '-B', '10', '-f', 'tcp port '+str(escrow_dumpcap_port), '-w', escrow_dumpcap_capture_file ], stdout=open(os.path.join(installdir, 'dumpcap', "dumpcap_escrow.stdout"),'w'), stderr=open(os.path.join(installdir, 'dumpcap', "dumpcap_escrow.stderr"),'w'))
+    except Exception,e:
+        print ('Exception starting dumpcap',e,end='\r\n')
+        cleanup_and_exit()
+    pids['dumpcap'] = dumpcap_proc.pid
+
 def cleanup_and_exit():
     print ('Cleaning up and exitting',end='\r\n')
     global pids
@@ -1366,10 +1601,10 @@ ppid = 0
 if __name__ == "__main__":
     print ('Installdir and current file:', installdir, currfile,end='\r\n')
     if len(sys.argv) < 2:
-        print ('Please provide one of the arguments: "buyer" or "seller" and optional "skip"',end='\r\n')
+        print ('Please provide one of the arguments: "buyer","seller",or "escrow" and optional "skip"',end='\r\n')
         exit()
     role = sys.argv[1]
-    if role != 'buyer' and role != 'seller':
+    if role != 'buyer' and role != 'seller' and role != 'escrow':
         print ('Unknown argument. Please provide one of the arguments: "buyer" or "seller" and optionall "skip"',end='\r\n')
         exit()
     skip_capture = False
@@ -1383,7 +1618,7 @@ if __name__ == "__main__":
     
     if role=='buyer':
         #global pids
-        create_directories_buyer()
+        buyer_create_directories()
         buyer_start_bitcoind_stunnel_sshpass_dumpcap(skip_capture)
         
         if skip_capture == False:
@@ -1407,9 +1642,9 @@ if __name__ == "__main__":
             print ("Terminating dumpcap",end='\r\n')
             os.kill(pids['dumpcap'], signal.SIGTERM)
             pids.pop('dumpcap')
-            
-        htmlhashes = buyer_get_htmlhashes()
-        sslhashes = buyer_get_sslhashes(buyer_dumpcap_capture_file, htmlhashes)
+        
+        html_frame = buyer_find_htmlframe(ref_string)
+        sslhashes = buyer_get_sslhashes(buyer_dumpcap_capture_file, html_frame)
         if sslhashes == 0:
             #Rearrange out-of-order frames
             rearranged_buyer_dumpcap_capture_file = rearrange_outoforder_frames(buyer_dumpcap_capture_file)
@@ -1420,6 +1655,7 @@ if __name__ == "__main__":
             else:
                 #make sure the escrow knows that the capture was rearranged
                 sslhashes.insert(0,'rearranged')
+        buyer_establish_e2b_channel()
         buyer_send_sslhashes(sslhashes)
         buyer_send_sslkeylogfile()
         
@@ -1432,8 +1668,9 @@ if __name__ == "__main__":
         
     elif role == 'seller':
         #global pids
-        create_directories_seller()
+        seller_create_directories()
         seller_start_bitcoind_stunnel_sshpass_dumpcap_squid(skip_capture)
+        seller_establish_e2s_channel()
         
         #minihttp is responsible for sending the certificate and receiving ssl hashes
         retval = []
@@ -1459,3 +1696,12 @@ if __name__ == "__main__":
         hashes = [hash for hash in retval[0].split(';') if len(hash)>0]
         send_logs_to_escrow(hashes)
         
+    elif role == 'escrow':
+        escrow_start_dumpcap()
+        retval = []
+        thread = ThreadWithRetval(target= escrow_start_minihttp_thread, args=(retval,))
+        thread.start()
+        while True:
+            thread.join(2)
+            if not thread.isAlive():
+                break
