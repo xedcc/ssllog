@@ -5,18 +5,23 @@ import time
 import fcntl
 import sys
 import select
+import wingdbstub
 
-access_log_dir = '/home/default2/Desktop/sshdtest/accesslog'
-oracle_socket = '/tmp/oracle-socket2'
+access_log_dir = '/home/default2/Desktop/sslxchange/sshdtest/accesslog'
+oracle_socket = '/tmp/oracle-socket'
+sshd_ppid = os.getppid()
+sys.stderr.write('Welcome\n')
 
 if len(sys.argv) != 2:
-    print 'Internal error. The amount of arguments in not 2'
+    sys.stderr.write('Internal error. The amount of arguments in not 2\n')
+    time.sleep(1)
     os.kill(sshd_ppid, signal.SIGTERM)
     exit()
 txid = sys.argv[1]
-sshd_ppid = os.getppid()
+sys.stderr.write('Your txid is: '+txid+'\n')
 if len(txid) != 9:
-    print 'Internal error. Txid length is not 9'
+    sys.stderr.write('Internal error. Txid length is not 9\n')
+    time.sleep(1)
     os.kill(sshd_ppid, signal.SIGTERM)
     exit()
     
@@ -35,10 +40,12 @@ if not os.path.isfile(access_file_path):
     try:
         open(access_file_path, 'w').close()
     except:
-        print ('Try again later')
-        return
+        sys.stderr.write('Try again later\n')
+        time.sleep(1)
+        os.kill(sshd_ppid, signal.SIGTERM)
+        exit()
     
-access_file = open(access_file_path, 'r+')
+access_file = open(access_file_path, 'a+')
 try:
     fcntl.flock(access_file, fcntl.LOCK_EX|fcntl.LOCK_NB)
 except IOError:
@@ -48,54 +55,59 @@ except IOError:
     s.connect(oracle_socket)
     s.send('ban '+txid)
     s.close()
+    sys.stderr.write('User has been banned\n')
+    time.sleep(1)
     os.kill(sshd_ppid, signal.SIGTERM)
     exit()
 access_file.write(str(int(time.time()))+'\n' )
 access_file.flush()
+access_file.seek(0, os.SEEK_SET)
 file_data = access_file.read()
-lines = file_data.split('\n')
-first_item = lines[0]
-lines = lines[1:]
-#contains (time, index)
-lower_threshold = (int(first_item),0)
-for index,time in enumerate(lines):
-    if int(time) - lower_threshold[0] < 600:
-        if index - lower_threshold[1] > 5:
+lines = file_data.split()
+
+current_timestamp = int(lines[-1])
+lines.reverse()
+for index,timestamp in enumerate(lines):
+    if current_timestamp - int(timestamp) < 600:
+        if index > 5:
             #more than 5 connections attempts in 10 minutes
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             s.connect(oracle_socket)
             s.send('ban '+txid)
             s.close()
+            sys.stderr.write('User has been banned\n')
+            time.sleep(1)
             os.kill(sshd_ppid, signal.SIGTERM)
             exit()
-        else:
-            continue
     else:
-        #find a new lower threshold
-        for newindex,newtime in enumerate(lines[lower_threshold[1]+1:index+1]):
-            if int(time) - int(newtime) < 600:
-                lower_threshold[0] = int(newtime)
-                lower_threshold[1] = lower_threshold[1]+1+newindex
-
+        break
+    
 fcntl.flock(access_file, fcntl.LOCK_UN)
 access_file.close()
 #finished anti DOS check
-  
+
   
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.connect(oracle_socket)          
-s.send(txid)
+s.send(txid+' '+str(sshd_ppid))
 
 while 1:
-    sleep(1)
+    time.sleep(1)
     rlist, wlist, xlist = select.select([sys.stdin,s],[],[])
     if sys.stdin in rlist:
-        cmd = sys.stdin.read()
-        s.send(txid+'-cmd ' +cmd)
+        cmd = sys.stdin.readline()
+        #Only proceed if there was actual data
+        if cmd:
+            cmd = cmd.strip()
+            s.send(txid+'-cmd ' +cmd)
     if s in rlist:
-        data_in = s.recv(1024)
-        print data_in
-        if data.startswith('finished'):
+        data_in = s.recv(4096)
+        sys.stderr.write(data_in+'\n')
+        sys.stderr.flush()
+        if data_in.startswith('finished'):
+            sys.stderr.write('Received finished signal\n')
+            sys.stderr.flush()
+            time.sleep(1)
             break
         
 
