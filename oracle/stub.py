@@ -53,7 +53,9 @@ if not TESTING:
         
     access_file = open(access_file_path, 'a+')
     fcntl.flock(access_file, fcntl.LOCK_EX)
-    access_file.write(str(int(time.time()))+'\n' )
+    cur_time = str(int(time.time()))
+    sys.stderr.write(cur_time + ' Connection attempt\n')
+    access_file.write(cur_time +'\n' )
     access_file.flush()
     access_file.seek(0, os.SEEK_SET)
     file_data = access_file.read()
