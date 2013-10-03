@@ -1,11 +1,12 @@
 AllowAgentForwarding no
 AllowTcpForwarding yes
 #GatewayPorts no
-AuthorizedKeysFile /home/default2/Desktop/sshdtest/authorizedkeys
-HostKey /home/default2/Desktop/sshdtest/ssh_host_rsa_key
+AuthorizedKeysFile /home/default2/Desktop/sslxchange/sshdtest/authorizedkeys
+HostKey /home/default2/Desktop/sslxchange/sshdtest/ssh_host_rsa_key
 LoginGraceTime 1
 MaxAuthTries 1
 MaxSessions 1
+MaxStartups 1
 PasswordAuthentication no
 PermitRootLogin no
 Port 2222

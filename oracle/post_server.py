@@ -2,14 +2,17 @@ import BaseHTTPServer, SimpleHTTPServer
 import os
 import subprocess
 
+installdir = os.path.dirname(os.path.realpath(__file__))
+logdir = os.path.join(installdir, 'post_server')
+if not os.path.isdir(logdir): os.mkdir(logdir)
+
 class MyHandler( BaseHTTPServer.BaseHTTPRequestHandler):
-    logdir = '/home/default2/Desktop/sslxchange/sshdtest'
 
     def do_POST( self ):
         try:
             filename = self.headers.getheader('escrow-filename')
             sha_hash = self.headers.getheader('escrow-hash')
-            tarfile = os.path.join(self.logdir,filename)
+            tarfile = os.path.join(logdir,filename)
             tarfile_fd = open(tarfile, 'w')
             
             length = int(self.headers.getheader('content-length'))

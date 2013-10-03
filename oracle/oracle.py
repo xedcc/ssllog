@@ -14,8 +14,9 @@ TESTING = True
 #if sys.argv[1] == 'testing' if len(sys.argv)>1 else False: TESTING = True
 
 database = []
-stcppipe_logdir = '/home/default2/Desktop/sslxchange/sshdtest/stcppipelog'
-authorized_keys = '/home/default2/Desktop/sslxchange/sshdtest/authorizedkeys'
+installdir = os.path.dirname(os.path.realpath(__file__))
+stcppipe_logdir = os.path.join(installdir, 'stcppipelog')
+authorized_keys = os.path.join(installdir, 'authorizedkeys')
 
 escrow_host = None
 escrow_port = None
@@ -23,7 +24,7 @@ is_escrow_registered = False
 is_escrow_logged_in = False
 escrow_last_sshd_ppid = 0
 
-db_lock_path = '/home/default2/Desktop/sslxchange/sshdtest/db.lock'
+db_lock_path = os.path.join(installdir, 'db.lock')
 db_lock_fd = open(db_lock_path, 'w')
 
 def __LOCK_DB():
@@ -48,7 +49,7 @@ def get_txid_index_in_db(txid, remove=False, lock=True):
             found_index = index
             break
     if remove==True and found_index != -1:
-        database.pop[index]
+        database.pop(index)
     if lock: __UNLOCK_DB()
     return found_index
 
@@ -72,12 +73,12 @@ def escrow_add_pubkey(txid, pubkey, port):
     if index >= 0:
         __UNLOCK_DB()
         return (-1, 'txid already added')
-    database.append({'txid':txid, 'pubkey':pubkey, 'port':int(port), 'time_added_to_db': int(time.time()), 'is_logged_in_now':False, 'last_login_time':0, 'has_finished_banking_session':False, 'time_fin_ban_sess':0, 'tarballsha256hash': '', 'has_escrow_copied_the_data':False, 'time_esc_cop_data':0, 'sshd_ppid':0})
+    database.append({'txid':txid, 'pubkey':pubkey, 'port':int(port), 'added': int(time.time()), 'is_logged_in_now':False, 'last_login_time':0, 'finished_banking':0, 'hash': '', 'escrow_fetched_tarball':0, 'sshd_ppid':0})
     __UNLOCK_DB()
     
     akeys_file = open(authorized_keys, 'a')
     fcntl.flock(akeys_file, fcntl.LOCK_EX)
-    akeys_file.write('no-pty,no-agent-forwarding,no-user-rc,no-X11-forwarding,permitopen="localhost:'+port+'",command="/usr/bin/python /home/default2/Desktop/sslxchange/sshdtest/stub.py '+txid+'"'+' ssh-rsa '+pubkey+'\n')
+    akeys_file.write('no-pty,no-agent-forwarding,no-user-rc,no-X11-forwarding,permitopen="localhost:'+port+'",command="/usr/bin/python '+os.path.join(installdir, 'stub.py')+' '+txid+'"'+' ssh-rsa '+pubkey+'\n')
     fcntl.flock(akeys_file, fcntl.LOCK_UN)
     akeys_file.close()
       
@@ -91,10 +92,9 @@ def escrow_get_tarball(txid):
     if index < 0:
         __UNLOCK_DB()
         return (-1, 'txid does not exist')
-    
-    is_sent_to_escrow = database[index]['has_escrow_copied_the_data']
-    tarball_hash = database[index]['tarballsha256hash']
-    has_finishes_session = database[index]['has_finished_banking_session']
+    has_finishes_session = database[index]['finished_banking']
+    is_sent_to_escrow = database[index]['escrow_fetched_tarball']
+    tarball_hash = database[index]['hash']
     __UNLOCK_DB()
     
     if not has_finishes_session:
@@ -116,8 +116,7 @@ def escrow_get_tarball(txid):
         __UNLOCK_DB()
         return (-1, 'txid does not exist even though it existed just a second ago')
     
-    database[index]['has_escrow_copied_the_data'] = True
-    database[index]['time_esc_cop_data'] = int(time.time())
+    database[index]['escrow_fetched_tarball'] = int(time.time())
     __UNLOCK_DB()
     return (0,'')
 
@@ -128,6 +127,7 @@ def cleanup_and_exit(conn, txid=0,  msg=''):
         if index < 0:
             print('finished Transaction ID not found in database')
             conn.send('finished Transaction ID not found in database')
+            time.sleep(1)
             conn.close()
             return
         __LOCK_DB()
@@ -137,10 +137,12 @@ def cleanup_and_exit(conn, txid=0,  msg=''):
         if is_logged_in == False:
             print('finished Internal error. User was already logged out')
             conn.send('finished Internal error. User was already logged out')
+            time.sleep(1)
             conn.close()
             return
     print('finished ' + msg)
     conn.send('finished ' + msg)
+    time.sleep(1)
     conn.close()
       
                
@@ -152,7 +154,6 @@ def thread_handle_txid(conn, txid, sshd_ppid):
         cleanup_and_exit(conn, msg='Transaction ID not found in database')
         return
            
-    has_finished = None
     port = None
     is_logged_in = None
     
@@ -169,16 +170,16 @@ def thread_handle_txid(conn, txid, sshd_ppid):
         except OSError:
             #The PID is no longer running, i.e. we have a stale session, leave is_logged_in in True and move on
             pass
-               
+    
+    finished_banking = database[index]['finished_banking']          
     database[index]['is_logged_in_now'] = True
     database[index]['sshd_ppid'] = int(sshd_ppid)
     database[index]['last_login_time'] = int(time.time())
     #Copy the vars which we'll need later, so we don't have to lock db again later
-    has_finished = database[index]['has_finished_banking_session']
     port = database[index]['port']
     __UNLOCK_DB()
  
-    if has_finished:
+    if finished_banking:
         #if the user has finished the banking session, it is assumed that he logs in to audit the database
         db_str = get_database_as_a_string()
         print 'Database sent to user'
@@ -188,35 +189,50 @@ def thread_handle_txid(conn, txid, sshd_ppid):
         cleanup_and_exit(conn, msg='Sent database to user', txid=txid)
         return
     
-    #setup to perform banking audit            
+    #setup to perform banking audit  
+    if not os.path.isdir(stcppipe_logdir): os.mkdir(stcppipe_logdir)
     logdir = os.path.join(stcppipe_logdir, txid)
     if os.path.isdir(logdir):
         shutil.rmtree(logdir)
     os.mkdir(logdir)
     start_time = int(time.time())
-    stcppipe_proc = subprocess.Popen(['/home/default2/Desktop/sslxchange/stcppipe/stcppipe', '-d', logdir, '-b', '127.0.0.1', '3128', str(port)])
+    stcppipe_proc = subprocess.Popen([os.path.join(installdir, 'stcppipe'), '-d', logdir, '-b', '127.0.0.1', '3128', str(port)])
     #if stcppipe returns with returncode 1 , it means that the port is in use. Very unlikely but possible
     time.sleep(1)
     if stcppipe_proc.poll() == 1:
         #modfy authkeys file and ask user to reconnect on a different random port
         newport = random.randint(1025,65535)
-        fd = open(authorized_keys, 'w+')
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        filedata = fd.read()
-        lines = filedata.split()
+        fd_read = open(authorized_keys, 'r')
+        fcntl.flock(fd_read, fcntl.LOCK_EX)
+        filedata = fd_read.read()
+        fd_write = open(authorized_keys, 'w')
+        lines = filedata.split('\n')
         is_found_in_authkeys = False
         for index,line in enumerate(lines):
             if line.count(txid) != 0:
                 line = line.replace(str(port),str(newport))
+                lines.pop(index)
+                lines.insert(index, line)
                 is_found_in_authkeys = True
                 break
         if not is_found_in_authkeys:
             cleanup_and_exit(conn, msg='Internal error. The txid was not found in authorized keys file', txid=txid)
             return
         for line in lines:
-            fd.write(line+'\n')        
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        fd.close()
+            fd_write.write(line+'\n')  
+        fd_write.close()
+        fcntl.flock(fd_read, fcntl.LOCK_UN)
+        fd_read.close()
+        
+        __LOCK_DB
+        index = get_txid_index_in_db(txid, lock=False)
+        if index < 0:
+            __UNLOCK_DB()
+            cleanup_and_exit(conn, msg='Transaction ID not found in database')
+            return
+        database[index]['port'] = newport
+        __UNLOCK_DB
+    
         cleanup_and_exit(conn, msg='Please reconnect and use port '+str(newport)+' for forwardng', txid=txid)
         return
     
@@ -258,9 +274,8 @@ def thread_handle_txid(conn, txid, sshd_ppid):
                 cleanup_and_exit(conn, msg='Transaction ID not found in database')
                 return
             
-            database[index]['has_finished_banking_session'] = True
-            database[index]['time_fin_ban_sess'] = finish_time
-            database[index]['tarballsha256hash'] = sha_hash
+            database[index]['finished_banking'] = finish_time
+            database[index]['hash'] = sha_hash
             __UNLOCK_DB()
             cleanup_and_exit(conn, msg='Session ended successfully ', txid=txid)
             return
@@ -358,7 +373,7 @@ def escrow_thread(conn, sshd_ppid):
             
             akeys_file = open(authorized_keys, 'w')
             fcntl.flock(akeys_file, fcntl.LOCK_EX)            
-            akeys_file.write('no-pty,no-agent-forwarding,no-user-rc,no-X11-forwarding,no-port-forwarding,command="/usr/bin/python /home/default2/Desktop/sslxchange/sshdtest/stub.py escrow-id" ssh-rsa '+pubkey+'\n')
+            akeys_file.write('no-pty,no-agent-forwarding,no-user-rc,no-X11-forwarding,no-port-forwarding,command="/usr/bin/python '+os.path.join(installdir, 'stub.py') + ' escrow-id" ssh-rsa '+pubkey+'\n')
             fcntl.flock(akeys_file, fcntl.LOCK_UN)
             akeys_file.close()
             
@@ -435,11 +450,11 @@ def escrow_thread(conn, sshd_ppid):
             continue
         
         if cmd == 'finish_session':
+            is_escrow_logged_in = False
             print('finished Escrow initiated disconnect')
             conn.send('finished Escrow initiated disconnect')
             time.sleep(1)
             conn.close()
-            is_escrow_logged_in = False
             return
             
         
@@ -456,30 +471,31 @@ def ban_user(txid):
     if not txid:
         print 'internal error. Empty txid'
         return
-    if txid == 'escrow-id':
-        #we don't want to actually ban escrow for good. He still has to wait another 10 minutes before logging in, though
-        return
-    fd = open(authorized_keys, 'w+')
-    fcntl.flock(fd, fcntl.LOCK_EX)
-    filedata = fd.read()
-    lines = filedata.split()
+    fd_read = open(authorized_keys, 'r')
+    fcntl.flock(fd_read, fcntl.LOCK_EX)
+    filedata = fd_read.read()
+    lines = filedata.split('\n')
     is_found_in_authkeys = False
     for index,line in enumerate(lines):
         if line.count(txid) != 0:
-            lines.pop[index]
+            lines.pop(index)
             is_found_in_authkeys = True
             break
     if not is_found_in_authkeys:
         print ('Internal error. The txid to be banned was not found in authorized keys file')
         return
+    fd_write = open(authorized_keys, 'w')
     for line in lines:
-        fd.write(line+'\n')        
-    fcntl.flock(fd, fcntl.LOCK_UN)
-    fd.close()
+        fd_write.write(line+'\n')
+    fd_write.close()
+    fcntl.flock(fd_read, fcntl.LOCK_UN)
+    fd_read.close()
     
-    if get_txid_index_in_db(txid, remove==True) == -1:
-        print 'nternal error. Could not find txid in database'
-        return
+    #escrow is not in the database
+    if txid != 'escrow-id':
+        if get_txid_index_in_db(txid, remove=True) == -1:
+            print 'Internal error. Could not find txid in database'
+            return
     
 
                 
@@ -487,7 +503,7 @@ def ban_user(txid):
 if __name__ == "__main__":
     
     auth_fd = open(authorized_keys, 'w')
-    auth_fd.write('no-pty,no-agent-forwarding,no-user-rc,no-X11-forwarding,no-port-forwarding,command="/usr/bin/python /home/default2/Desktop/sslxchange/sshdtest/stub.py escrow-id" ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQClBsy9E5wPNvuc0ACLDdY1RLrzAeTcyvOAQ/W+2y7KV4cu96LuiNDFLk44WSVKAK/+StGN/PjOaBxLybRugBbCEH7wGRkYb3D1EdOA2ybgTj2Qqpc+9x+RiEZwj3wZywj6qc/35JZHdWy+rsbrNOiz4/aLTyBdKW9D3ZPDUikLekMmcw+mbGV7oVPZOIbpKOmvPI6MmiM3SradS0B4nbemm3TXKe5CPX9JDz9fX2yjGFKoSXC1WiZnbfHmo5R6KRXsJ17mEENgalv85T4rZmq1Kup/dDncGozFUone0MY7ocxUskQWy3MxMOxwPqOZMmNLPzux7sWZmGHKlgcrKO8P\n')
+    auth_fd.write('no-pty,no-agent-forwarding,no-user-rc,no-X11-forwarding,no-port-forwarding,command="/usr/bin/python ' + os.path.join(installdir, 'stub.py') + ' escrow-id" ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQClBsy9E5wPNvuc0ACLDdY1RLrzAeTcyvOAQ/W+2y7KV4cu96LuiNDFLk44WSVKAK/+StGN/PjOaBxLybRugBbCEH7wGRkYb3D1EdOA2ybgTj2Qqpc+9x+RiEZwj3wZywj6qc/35JZHdWy+rsbrNOiz4/aLTyBdKW9D3ZPDUikLekMmcw+mbGV7oVPZOIbpKOmvPI6MmiM3SradS0B4nbemm3TXKe5CPX9JDz9fX2yjGFKoSXC1WiZnbfHmo5R6KRXsJ17mEENgalv85T4rZmq1Kup/dDncGozFUone0MY7ocxUskQWy3MxMOxwPqOZMmNLPzux7sWZmGHKlgcrKO8P\n')
     auth_fd.close()
     
     oracle_socket = '/tmp/oracle-socket'
