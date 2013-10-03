@@ -1,8 +1,8 @@
 AllowAgentForwarding no
 AllowTcpForwarding yes
 #GatewayPorts no
-AuthorizedKeysFile /home/default2/Desktop/sslxchange/sshdtest/authorizedkeys
-HostKey /home/default2/Desktop/sslxchange/sshdtest/ssh_host_rsa_key
+AuthorizedKeysFile /home/default2/Desktop/sslxchange/oracle/authorizedkeys
+HostKey /home/default2/Desktop/sslxchange/oracle/ssh_host_rsa_key
 LoginGraceTime 1
 MaxAuthTries 1
 MaxSessions 1
