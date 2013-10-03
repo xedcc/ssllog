@@ -16,14 +16,17 @@ sshd_ppid = os.getppid()
 if len(sys.argv) != 2:
     import signal
     sys.stderr.write('Internal error. The amount of arguments in not 2\n')
+    sys.stderr.flush()
     time.sleep(1)
     os.kill(sshd_ppid, signal.SIGTERM)
     exit()
 txid = sys.argv[1]
 sys.stderr.write('Your txid is: '+txid+'\n')
+sys.stderr.flush()
 if len(txid) != 9:
     import signal
     sys.stderr.write('Internal error. Txid length is not 9\n')
+    sys.stderr.flush()
     time.sleep(1)
     os.kill(sshd_ppid, signal.SIGTERM)
     exit()
@@ -47,6 +50,7 @@ if not TESTING:
         except:
             import signal
             sys.stderr.write('Try again later\n')
+            sys.stderr.flush()
             time.sleep(1)
             os.kill(sshd_ppid, signal.SIGTERM)
             exit()
@@ -55,6 +59,7 @@ if not TESTING:
     fcntl.flock(access_file, fcntl.LOCK_EX)
     cur_time = str(int(time.time()))
     sys.stderr.write(cur_time + ' Connection attempt\n')
+    sys.stderr.flush()
     access_file.write(cur_time +'\n' )
     access_file.flush()
     access_file.seek(0, os.SEEK_SET)
@@ -76,6 +81,7 @@ if not TESTING:
                 s.send('ban '+txid)
                 s.close()
                 sys.stderr.write('Too frequent connections. User has been banned. Contact escrow for details\n')
+                sys.stderr.flush()
                 #wait for changes to propagate to authkeysfile
                 time.sleep(10)
                 #get inode of lockfile and kill processes waiting on the lock of that inode
@@ -96,6 +102,7 @@ if not TESTING:
                 for proc in procs_to_kill:
                     os.kill(int(proc), signal.SIGTERM)
                 sys.stderr.write('Killed ' +str(len(procs_to_kill)) + ' processes \n')
+                sys.stderr.flush()
                 os.kill(sshd_ppid, signal.SIGTERM)
                 exit()
         else:
@@ -111,6 +118,7 @@ import subprocess
 import signal
 
 sys.stderr.write('Welcome\n')
+sys.stderr.flush()
   
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.connect(oracle_socket)          
