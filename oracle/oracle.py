@@ -506,10 +506,7 @@ if __name__ == "__main__":
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     #reuse address for multiple runs during testing
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    try:
-        os.remove(oracle_socket)
-    except OSError:
-        pass
+    if os.path.exists(oracle_socket): os.unlink(oracle_socket)
     s.bind(oracle_socket)
     #/proc/sys/net/core/somaxconn is 128 on Linux, doesn't hurt to set higher just in case it can get higher
     s.listen(150)
