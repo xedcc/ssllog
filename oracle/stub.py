@@ -69,8 +69,8 @@ if not TESTING:
     current_timestamp = int(lines[-1])
     lines.reverse()
     for index,timestamp in enumerate(lines):
-        if current_timestamp - int(timestamp) < 600:
-            if index > 5:
+        if current_timestamp - int(timestamp) < 3600:
+            if index > 3:
                 import signal
                 import socket
                 import subprocess

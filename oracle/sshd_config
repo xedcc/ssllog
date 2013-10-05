@@ -36,7 +36,8 @@ LogLevel INFO
 # Authentication:
 #					******
 #changed from LoginGraceTime 120
-LoginGraceTime 1
+# 3 seconds should be plenty to send a pubkey.
+LoginGraceTime 3
 #changed from PermitRootLogin yes 
 PermitRootLogin no
 #					******
