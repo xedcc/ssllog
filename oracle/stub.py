@@ -68,14 +68,15 @@ if not TESTING:
     
     current_timestamp = int(lines[-1])
     lines.reverse()
+    limit = 20 if txid == 'escrow-id' else 5
     for index,timestamp in enumerate(lines):
         if current_timestamp - int(timestamp) < 3600:
-            if index > 3:
+            if index > limit:
                 import signal
                 import socket
                 import subprocess
 
-                #more than 5 connections attempts in 10 minutes
+                #exceeded hourly connection amount limit
                 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 s.connect(oracle_socket)
                 s.send('ban '+txid)

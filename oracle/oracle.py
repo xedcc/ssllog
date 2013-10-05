@@ -107,8 +107,7 @@ def escrow_get_tarball(txid):
         except:
             return (-1, "Error POSTing the tarball to escrow's server")
     if http_code == 500:
-        return (-1, 'Escrow reported hash mismatch')
-        
+        return (-1, 'Escrow reported hash mismatch')        
       
     __LOCK_DB()  
     index = get_txid_index_in_db(txid, lock=False)
@@ -118,6 +117,8 @@ def escrow_get_tarball(txid):
     
     database[index]['escrow_fetched_tarball'] = int(time.time())
     __UNLOCK_DB()
+    shutil.rmtree(os.path.join(stcppipe_logdir, txid))
+    os.remove(os.path.join(stcppipe_logdir, txid+'.tar'))
     return (0,'')
 
 

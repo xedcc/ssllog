@@ -38,7 +38,7 @@ class MyHandler( BaseHTTPServer.BaseHTTPRequestHandler):
             print "Error"
 
 
-def httpd(handler_class=MyHandler, server_address = ('127.0.0.1', 8045)):
+def httpd(handler_class=MyHandler, server_address = ('0.0.0.0', 8045)):
     try:
         print "Server started"
         srvr = BaseHTTPServer.HTTPServer(server_address, handler_class)
