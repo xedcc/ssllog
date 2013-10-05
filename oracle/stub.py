@@ -10,7 +10,7 @@ TESTING=False
 
 installdir = os.path.dirname(os.path.realpath(__file__))
 access_log_dir = os.path.join(installdir, 'accesslog')
-oracle_socket = '/tmp/oracle-socket'
+oracle_socket = os.path.join(installdir, 'oracle-socket')
 
 sshd_ppid = os.getppid()
 if len(sys.argv) != 2:

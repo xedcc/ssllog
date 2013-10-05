@@ -502,11 +502,7 @@ def ban_user(txid):
 
 if __name__ == "__main__":
     
-    auth_fd = open(authorized_keys, 'w')
-    auth_fd.write('no-pty,no-agent-forwarding,no-user-rc,no-X11-forwarding,no-port-forwarding,command="/usr/bin/python ' + os.path.join(installdir, 'stub.py') + ' escrow-id" ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQClBsy9E5wPNvuc0ACLDdY1RLrzAeTcyvOAQ/W+2y7KV4cu96LuiNDFLk44WSVKAK/+StGN/PjOaBxLybRugBbCEH7wGRkYb3D1EdOA2ybgTj2Qqpc+9x+RiEZwj3wZywj6qc/35JZHdWy+rsbrNOiz4/aLTyBdKW9D3ZPDUikLekMmcw+mbGV7oVPZOIbpKOmvPI6MmiM3SradS0B4nbemm3TXKe5CPX9JDz9fX2yjGFKoSXC1WiZnbfHmo5R6KRXsJ17mEENgalv85T4rZmq1Kup/dDncGozFUone0MY7ocxUskQWy3MxMOxwPqOZMmNLPzux7sWZmGHKlgcrKO8P\n')
-    auth_fd.close()
-    
-    oracle_socket = '/tmp/oracle-socket'
+    oracle_socket = os.path.join(installdir, 'oracle-socket')
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     #reuse address for multiple runs during testing
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

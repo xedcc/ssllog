@@ -1,12 +1,19 @@
 AllowAgentForwarding no
 AllowTcpForwarding yes
 #GatewayPorts no
-AuthorizedKeysFile /home/default2/Desktop/sslxchange/oracle/authorizedkeys
+AuthorizedKeysFile /etc/ssh/authorizedkeys
+
+#HostKey will be automatically generated upon system start
 HostKey /home/default2/Desktop/sslxchange/oracle/ssh_host_rsa_key
+
 LoginGraceTime 1
 MaxAuthTries 1
 MaxSessions 1
+
+#Prevent new connections flood and give more time to oracle.py to block the offending pubkey
+#Tests showed that no more than 20 connections will be established by the time the pubkey is removed from AuthKeysFile
 MaxStartups 1
+
 PasswordAuthentication no
 PermitRootLogin no
 Port 2222
@@ -14,3 +21,7 @@ Protocol 2
 PubkeyAuthentication yes
 UsePrivilegeSeparation yes
 X11Forwarding no
+
+#to avoid the file permission nightmare when running sshd as a regular user
+StrictModes no
+LogLevel DEBUG3
