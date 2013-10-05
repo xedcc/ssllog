@@ -16,7 +16,7 @@ TESTING = True
 database = []
 installdir = os.path.dirname(os.path.realpath(__file__))
 stcppipe_logdir = os.path.join(installdir, 'stcppipelog')
-authorized_keys = os.path.join(installdir, 'authorizedkeys')
+authorized_keys = os.path.join(installdir, '.ssh', 'authorized_keys')
 
 escrow_host = None
 escrow_port = None
