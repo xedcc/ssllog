@@ -1,12 +1,12 @@
 #Modified for the purposes of oracle. All modifications are within brackets
-#					******
+#					(--- ---)
 
-#					******The following options were added
+#					(--- The following options were added
 AllowAgentForwarding no
 AllowTcpForwarding yes
 MaxAuthTries 1
 MaxSessions 1
-#					******There are some other options below which were modified
+#					---) There are some other options below which were modified
 
 
 # Package generated configuration file
@@ -34,13 +34,13 @@ SyslogFacility AUTH
 LogLevel INFO
 
 # Authentication:
-#					******
+#					(---
 #changed from LoginGraceTime 120
 # 3 seconds should be plenty to send a pubkey.
 LoginGraceTime 3
 #changed from PermitRootLogin yes 
 PermitRootLogin no
-#					******
+#					---)
 StrictModes yes
 
 RSAAuthentication yes
@@ -76,28 +76,29 @@ PasswordAuthentication no
 #GSSAPIAuthentication no
 #GSSAPICleanupCredentials yes
 
-#					******
+#					(---
 #changed from X11Forwarding yes
 X11Forwarding no
-#					******
+#					---)
 X11DisplayOffset 10
 PrintMotd no
 PrintLastLog yes
 TCPKeepAlive yes
 #UseLogin no
 
-#					******
+#					(---
 #changed from #MaxStartups 10:30:60
 #Prevent new connections flood and give more time to oracle.py to block the offending pubkey
 #Tests showed that no more than 20 connections will be established by the time the pubkey is removed from AuthKeysFile
 MaxStartups 1
-#					******
+#					---)
 #Banner /etc/issue.net
 
 # Allow client to pass locale environment variables
-AcceptEnv LANG LC_*
+#					(--- commented out the following 3 options
+#AcceptEnv LANG LC_*
 
-Subsystem sftp /usr/lib/openssh/sftp-server
+#Subsystem sftp /usr/lib/openssh/sftp-server
 
 # Set this to 'yes' to enable PAM authentication, account processing,
 # and session processing. If this is enabled, PAM authentication will
@@ -108,4 +109,5 @@ Subsystem sftp /usr/lib/openssh/sftp-server
 # If you just want the PAM account and session checks to run without
 # PAM authentication, then enable this but set PasswordAuthentication
 # and ChallengeResponseAuthentication to 'no'.
-UsePAM yes
+#UsePAM yes
+#					---)

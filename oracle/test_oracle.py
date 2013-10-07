@@ -10,7 +10,7 @@
 #user2 logs in and just waits, user3 with a busy port logs in
 #Escrow check database (user3 port should change)
 
-#Make sure that oracle.py and post_server.py are running
+#Make sure that "oracle.py testing " and "post_server.py" are running
 #Make sure that this test is run from the same directory where stub.py resides
 
 import subprocess
@@ -30,13 +30,13 @@ pubkey_user2 = 'AAAAB3NzaC1yc2EAAAADAQABAAABAQCqrY7EJIjAd3Iy/4BzVmmwm7PSTI2mtATO
 pubkey_user3 = 'AAAAB3NzaC1yc2EAAAADAQABAAABAQDtLCIqoZwIC6Pj3qBgn6i0sXGzb01lRZYZDqv1YXUqQbqWUJAbTR6OvvKDvlq1ssVs/vicsEdZPID3gosPK5ZlwsHNRAZ7ohyy2oVPefR4DDijlg6MEIAEcK/zTn5S2GLoIvSMD63ZAh0W7idsI2PZiZJ2QpCZxigQn5vT5XZMmaI8JTtKbl8V7/O7yB8gs0m6o2HXJqJXD1068TwUzXfgQC332cy4JeeEDfqTkk34rPdsRSNA1df9wYFgbT5m+4PpeZ9Uy85OfMcT9dxpeF6XSJ4/MypPx8QpcuWtByQ5QPdBUdyUzzZ5B5/u6IK3GOgXdAONLDsR+b16tvEDo10T'
 
 installdir = os.path.dirname(os.path.realpath(__file__))
-authorized_keys = os.path.join(installdir, 'authorizedkeys')
+authorized_keys = os.path.join(installdir, '.ssh', 'authorized_keys')
 
 
 ak_escrow_std = 'no-pty,no-agent-forwarding,no-user-rc,no-X11-forwarding,no-port-forwarding,command="/usr/bin/python ' + os.path.join(installdir, 'stub.py') + ' escrow-id"'
 ak_user_std1 = 'no-pty,no-agent-forwarding,no-user-rc,no-X11-forwarding,permitopen="localhost:'
 ak_user_std2 = '",command="/usr/bin/python ' + os.path.join(installdir, 'stub.py')
-
+ssh_port = 22
 
 test_register_escrow = False
 test_keyfile_after_escreg = False
@@ -89,7 +89,7 @@ is_user3_session_finished = False
 is_user3_newport_received = False
 
 
-escrow_proc = subprocess.Popen(['ssh', '-i', os.path.join(installdir, 'escrow_key'), 'localhost', '-p', '2222'], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+escrow_proc = subprocess.Popen(['ssh', '-i', os.path.join(installdir, 'escrow_key'), 'localhost', '-p', str(ssh_port)], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
 
 while 1:
     rlist, wlist, xlist = select.select([escrow_proc.stderr, user_stderr, user2_stderr, user3_stderr],[],[], 0.5)
@@ -233,7 +233,7 @@ while 1:
     
     if not test_start_user_sshd:
         print 'Starting user ssh'
-        user_proc = subprocess.Popen(['ssh', '-o', 'IdentitiesOnly=yes', '-i', os.path.join(installdir, 'key1'), 'localhost', '-p', '2222'], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        user_proc = subprocess.Popen(['ssh', '-o', 'IdentitiesOnly=yes', '-i', os.path.join(installdir, 'key1'), 'localhost', '-p', str(ssh_port)], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         user_stderr=user_proc.stderr
         test_start_user_sshd = True
         continue
@@ -253,8 +253,8 @@ while 1:
         continue
     
     if not test_send_finished_msg:
-        print ('Sending finished message to user ssh')
-        user_proc.stdin.write('finished\n')
+        print ('Sending exit message to user ssh')
+        user_proc.stdin.write('exit\n')
         test_send_finished_msg = True
         continue
     
@@ -322,7 +322,7 @@ while 1:
     if not test_start_user_sshd_again:
         print 'Starting user ssh'
         is_user_db_ready = False
-        user_proc = subprocess.Popen(['ssh', '-o', 'IdentitiesOnly=yes', '-i', os.path.join(installdir, 'key1'), 'localhost', '-p', '2222'], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        user_proc = subprocess.Popen(['ssh', '-o', 'IdentitiesOnly=yes', '-i', os.path.join(installdir, 'key1'), 'localhost', '-p', str(ssh_port)], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         user_stderr=user_proc.stderr
         test_start_user_sshd_again = True
         continue
@@ -422,9 +422,9 @@ while 1:
     
     if not test_escrow_logout:
         is_escrow_loggedout = False
-        escrow_proc.stdin.write('finish_session'+'\n')
+        escrow_proc.stdin.write('exit'+'\n')
         escrow_proc.stdin.flush()
-        print ('Sent finish_session')
+        print ('Sent exit')
         test_escrow_logout = True
         continue
     
@@ -432,7 +432,7 @@ while 1:
         if not is_escrow_loggedout:
             continue
         print ('Starting an escrow ssh session')
-        escrow_proc = subprocess.Popen(['ssh', '-i', os.path.join(installdir, 'escrow_key'), 'localhost', '-p', '2222'], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        escrow_proc = subprocess.Popen(['ssh', '-i', os.path.join(installdir, 'escrow_key'), 'localhost', '-p', str(ssh_port)], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         time.sleep(2)
         if escrow_proc.poll() != None:
             #the process returned an exit code
@@ -454,7 +454,7 @@ while 1:
     
     if not test_start_user2_sshd:
         print ('Starting a user2 ssh session')
-        user2_proc = subprocess.Popen(['ssh', '-i', os.path.join(installdir, 'key2'), 'localhost', '-p', '2222'], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        user2_proc = subprocess.Popen(['ssh', '-i', os.path.join(installdir, 'key2'), 'localhost', '-p', str(ssh_port)], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         user2_stderr = user2_proc.stderr
         time.sleep(6)
         if user2_proc.poll() != None:
@@ -468,7 +468,7 @@ while 1:
     
     if not test_start_user3_sshd:
         print ('Starting a user3 ssh session')
-        user3_proc = subprocess.Popen(['ssh', '-i', os.path.join(installdir, 'key3'), 'localhost', '-p', '2222'], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        user3_proc = subprocess.Popen(['ssh', '-i', os.path.join(installdir, 'key3'), 'localhost', '-p', str(ssh_port)], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         user3_stderr = user3_proc.stderr
         time.sleep(6)
         if user3_proc.poll() == None:

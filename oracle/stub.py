@@ -126,6 +126,7 @@ s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.connect(oracle_socket)          
 s.send(txid+' '+str(sshd_ppid))
 
+data_in = None
 while 1:
     time.sleep(1)
     #either a user command on stdin or an oracle.py response on s
