@@ -1,0 +1,59 @@
+HOW TO CREATE ORACLE INSTANCE.
+
+
+Install ec2-api-tools on your local machine.
+
+ec2-run-instances ami-d0f89fb9 -t t1.micro -z us-east-1a -b /dev/sda1=none -b /dev/sda1=<snap-id>::false:standard -O <Access Key ID> -W <Secret Access Key>
+
+
+
+
+HOW TO CHECK THE INTEGRITY OF THE ORACLE EBS SNAPSHOT.
+
+Launch a new instance Ubuntu Server 12.04.2 LTS 64 bit AMI ID ami-d0f89fb9.
+Wait for the instance to initialize and "Status Checks" showing "2/2 checks passed".
+Stop the instance, wait for the state to become "Stopped", and detach the volume.
+Wait for the volume state to become "available" and attach the volume to any running instance.
+
+From within the running instance "sudo mount" the volume and perform file system changes to the mounted volume:
+(The folowing needs to be deleted as files in those locations will always vary between instances of the same AMI.)
+
+delete and recreate /dev with permissions 755 root:root
+rm /etc/hostname 
+rm -r /var/log
+rm -r /var/lib/cloud
+rm -r /var/lib/dhcp
+rm -r /var/lib/plymouth
+rm -r /var/lib/urandom
+rm /etc/ssh/ssh_host_*
+rm /home/ubuntu/.ssh/authorized_keys
+rm /home/root/.ssh/authorized_keys
+
+Copy the following files from git's oracle directory making sure the permissions match:
+ 
+rc.local        to /etc/rc.local 	 perm 755	
+ssh.conf        to /etc/init/ssh.conf  	 perm 644 
+sshd_config     to /etc/ssh/sshd_config	 perm 644
+authorized_keys to /home/ubuntu/.ssh/authorized_keys perm 600
+oracle.py       to /home/ubuntu		 perm 600
+stub.py         to /home/ubuntu		 perm 600
+stcppipe.zip    to /home/ubuntu		 perm 600
+
+Now compare hashes from the modified snapshot to hashes of oracle-snapshot. First hash file/directory/symlink paths, ownership, permissions, and symlink targets then hash the contents of all regular files.
+
+cd into the root directory of the mounted volume , e.g. cd /mnt/myvolume
+
+find . -printf '%h %f %U %G %m %l\n' | sha256sum
+758d7f4f6e9283607a30ce779e7e5bd4429106a9d98336471cedbea8eccd09de
+
+find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum
+dc5a8321c3b3de38ef7a12a79a30a05ef4c1cb4419b662dc5f5ec14af55c635c
+
+
+
+
+HOW TO PROVE TO THE WORLD THAT A CERTAIN IP ADDRESS IS RUNNING THE ORACLE INSTANCE.
+
+USing aws_query.py create and make public GET strings for requests DescribeInstances and DescribeVolumes.
+
+
