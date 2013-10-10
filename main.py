@@ -1108,7 +1108,7 @@ def start_firefox():
         print ("Couldn't find user's home directory",end='\r\n')
         cleanup_and_exit()
     #todo allow user to specify firefox profile dir manually 
-    ff_user_dir = os.path.join(homedir, ".mozilla", "firtsefox")   
+    ff_user_dir = os.path.join(homedir, ".mozilla", "firefox")   
     # skip this step if "ssllog" profile already exists
     if (not os.path.isdir(os.path.join(ff_user_dir, "ssllog_profile"))):
         print ("Copying plugin files into Firefox's plugin directory",end='\r\n')
@@ -1524,6 +1524,7 @@ def get_htmlhash_from_asciidump(ascii_dump):
     binary_html3 = binary_html2.replace('\r','\n')
     return binary_html3
    
+
 def rearrange_outoforder_frames(capture_file):
 #This function analyzes a wireshark capture searching for a pattern of out-of-order frames
 #The corrected capture file with the prefix "new_" will be placed in the same dir as the original capture file

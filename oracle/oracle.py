@@ -270,11 +270,11 @@ def thread_handle_txid(conn, txid, sshd_ppid):
             cleanup_and_exit(conn, msg='Time limit expired. Connection closed', txid=txid)
             return
         
-        #Anti DOS measure. Every minute make sure the user is not overwhelming the logdir with data or new files(generated on every new connection). Limits: 200 files and 50MB of data
+        #Anti DOS measure. Every minute make sure the user is not overwhelming the logdir with data or new files(generated on every new connection). Limits: 1000 files or 50MB of data
         if current_time-last_dos_check > 60:
             last_dos_check = current_time
             filelist = os.listdir(logdir)
-            if len(filelist) > 200 or sum([os.path.getsize(os.path.join(logdir,f)) for f in filelist]) > 50000000:
+            if len(filelist) > 1000 or sum([os.path.getsize(os.path.join(logdir,f)) for f in filelist]) > 50000000:
                 ban_user(txid)
                 os.kill(stcppipe_proc.pid, signal.SIGTERM)
                 time.sleep(3)
