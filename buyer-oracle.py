@@ -82,13 +82,13 @@ def get_html_from_asciidump(ascii_dump):
 
     if ascii_dump == '':
         print ('empty frame dump',end='\r\n')
-        cleanup_and_exit()
-        return -1
+        return 1
 
-    #We are interested in "Uncompressed entity body" for compressed HTML. If not present, then
-    #the very last entry of "De-chunked entity body" for no-compression no-chunks HTML. If not present, then
-    #the very last entry of "Reassembled SSL" for no-compression no-chunks HTML in multiple SSL segments (very rare),
-    #and finally, the very last entry of "Decrypted SSL data" for no-compression no-chunks HTML in a single SSL segment.
+    #We are interested in
+    # "Uncompressed entity body" for compressed HTML (both chunked and not chunked). If not present, then
+    # "De-chunked entity body" for no-compression, chunked HTML. If not present, then
+    # "Reassembled SSL" for no-compression no-chunks HTML in multiple SSL segments, If not present, then
+    # "Decrypted SSL data" for no-compression no-chunks HTML in a single SSL segment.
     
     uncompr_pos = ascii_dump.rfind('Uncompressed entity body')
     if uncompr_pos != -1:
@@ -241,6 +241,7 @@ def buyer_start_minihttp_thread():
     sa = httpd.socket.getsockname()
     print ("Serving HTTP on", sa[0], "port", sa[1], "...",end='\r\n')
     httpd.serve_forever()
+
 
 if __name__ == "__main__":
     thread = threading.Thread(target= buyer_start_minihttp_thread)
