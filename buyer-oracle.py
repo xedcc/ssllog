@@ -5,10 +5,14 @@ import subprocess
 import sys
 import BaseHTTPServer, SimpleHTTPServer
 import threading
+import urllib
+from xml.dom import minidom
+import base64
 
 logdir = '/home/default2/Desktop/sslxchange/oracle/logs'
 sslkeylog = '/home/default2/Desktop/sslkeylog'
 buyer_http_port = 2222
+oracle_snapID ='snap-1a8f0718'
 
 ALPHA_TESTING = True
 accno = None
@@ -242,8 +246,200 @@ def buyer_start_minihttp_thread():
     print ("Serving HTTP on", sa[0], "port", sa[1], "...",end='\r\n')
     httpd.serve_forever()
 
+def start_firefox():
+    #we could ask user to run Firefox with -ProfileManager and create a new profile themselves
+    #but to be as user-friendly as possible, we add a new Firefox profile behind the scenes
+    
+    homedir = os.path.expanduser("~")
+    if homedir == "~":
+        print ("Couldn't find user's home directory",end='\r\n')
+        cleanup_and_exit()
+    #todo allow user to specify firefox profile dir manually 
+    ff_user_dir = os.path.join(homedir, ".mozilla", "firefox")   
+    # skip this step if "ssllog" profile already exists
+    if (not os.path.isdir(os.path.join(ff_user_dir, "ssllog_profile"))):
+        print ("Copying plugin files into Firefox's plugin directory",end='\r\n')
+       
+        try:
+            inifile = open(os.path.join(ff_user_dir, "profiles.ini"), "r+a")
+        except Exception,e: 
+            print ('Could not open profiles.ini. Make sure it exists and you have sufficient read/write permissions',e,end='\r\n')
+            cleanup_and_exit()
+        text = inifile.read()
+   
+        #get the last profile number and increase it by 1 for our profile
+        our_profile_number = int(text[text.rfind("[Profile")+len("[Profile"):].split("]")[0]) +1
+    
+        try:
+            inifile.write('[Profile' +str(our_profile_number) + ']\nName=ssllog\nIsRelative=1\nPath=ssllog_profile\n\n')
+        except Exception,e:
+            print ('Could not write to profiles.ini. Make sure you have sufficient write permissions',e,end='\r\n')
+            cleanup_and_exit()
+        inifile.close()
+    
+        #create an extension dir and copy the extension files
+        #we are not distributing our extension as xpi, but rather as a directory with files
+        os.mkdir(os.path.join(ff_user_dir, 'ssllog_profile'))
+        ff_extensions_dir = os.path.join(ff_user_dir, "ssllog_profile", "extensions")
+        os.mkdir(ff_extensions_dir)
+        #todo handle mkdir exception
+        
+        try:
+            mfile = open (os.path.join(ff_extensions_dir, "sample@example.net"), "w+")
+        except Exception,e:
+            print ('File open error', e,end='\r\n')
+            cleanup_and_exit()
+        #todo print line number in error messages
+        
+        #write the path into the file
+        try:
+            mfile.write(os.path.join(ff_extensions_dir, "ssllog_addon"))
+        except Exception,e:
+            print ('File write error', e,end='\r\n')
+            cleanup_and_exit()
+        
+        try:    
+            shutil.copytree(os.path.join(installdir,"FF-addon"), os.path.join(ff_extensions_dir, "ssllog_addon"))
+        except Exception,e:
+            print ('Error copying addon from installdir',e,end='\r\n') 
+            cleanup_and_exit()
+    
+    #empty html files from previous session
+    for the_file in os.listdir(htmldir):
+        file_path = os.path.join(htmldir, the_file)
+        try:
+            if os.path.isdir(file_path): 
+                shutil.rmtree(file_path)
+            else:
+                os.unlink(file_path)
+        except Exception, e:
+            print ('Error while removing html files from previous session',e,end='\r\n')
+            cleanup_and_exit()
+
+    #SSLKEYLOGFILE
+    sslkeylogfile_path = os.path.join(installdir, 'dumpcap', 'sslkeylog')
+    os.putenv("SSLKEYLOGFILE", sslkeylogfile_path)
+    #TMP is where the html files are going to be saved
+    os.putenv("TMP", os.path.join(installdir, 'htmldir'))
+    print ("Starting a new instance of Firefox with a new profile",end='\r\n')
+    try:
+        subprocess.Popen([firefox_exepath,'-new-instance', '-P', 'ssllog'], stdout=open(os.path.join(installdir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(installdir, 'firefox', "firefox.stderr"), 'w'))
+    except Exception,e:
+        print ("Error starting Firefox", e,end='\r\n')
+        cleanup_and_exit()
+
+#using AWS query API make sure oracle meets the criteria
+def check_oracle_urls (DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutputURL, oracle_dns):
+    try:
+        di_url = urllib.urlopen(DescribeInstancesURL)
+        di_xml = di_url.read()
+    except Exception,e:
+        print(e, end='\r\n')
+        return -2
+    try:
+        di_dom = minidom.parseString(di_xml)
+    except Exception,e:
+        print(e, end='\r\n')
+        return -3
+    
+    is_dns_found = False
+    dns_names = di_dom.getElementsByTagName('dnsName')
+    for one_dns_name in dns_names:
+        if one_dns_name.firstChild.data != oracle_dns:
+            continue
+        is_dns_found = True
+        break
+    if not is_dns_found:
+        return -1
+    instance = one_dns_name.parentNode
+    
+    if instance.getElementsByTagName('imageId')[0].firstChild.data != 'ami-d0f89fb9' or
+    instance.getElementsByTagName('instanceState')[0].getElementsByTagName('name')[0].firstChild.data != 'running' or
+    instance.getElementsByTagName('rootDeviceName')[0].firstChild.data != '/dev/sda1':
+        return -1
+    launchTime = instance.getElementsByTagName('launchTime')[0].firstChild.data
+    instanceId = instance.getElementsByTagName('instanceId')[0].firstChild.data
+    
+    volumes = instance.getElementsByTagName('blockDeviceMapping')[0].getElementsByTagName('item')
+    if len(volumes) > 1: return -1
+    if volumes[0].getElementsByTagName('deviceName')[0].firstChild.data != '/dev/sda2': return -1
+    if volumes[0].getElementsByTagName('ebs')[0].getElementsByTagName('status')[0].firstChild.data != 'attached': return -1
+    instance_volumeId = volumes[0].getElementsByTagName('ebs')[0].getElementsByTagName('volumeId')[0].firstChild.data
+    attachTime = volumes[0].getElementsByTagName('ebs')[0].getElementsByTagName('attachTime')[0].firstChild.data
+    
+    try:
+        dv_url = urllib.urlopen(DescribeVolumesURL)
+        dv_xml = dv_url.read()
+    except Exception,e:
+        print(e, end='\r\n')
+        return -2
+    try:
+        dv_dom = minidom.parseString(dv_xml)
+    except Exception,e:
+        print(e, end='\r\n')
+        return -3
+    
+    is_volumeID_found = False
+    volume_IDs = dv_dom.getElementsByTagName('volumeId')
+    for one_volume_ID in volume_IDs:
+        if one_volume_ID.firstChild.data != instance_volumeId:
+            continue
+        is_volumeID_found = True
+        break
+    if not is_volumeID_found:
+        return -1
+    volume = one_volume_ID.parentNode
+    
+    if volume.getElementsByTagName('snapshotId')[0].firstChild.data != oracle_snapID or
+    volume.getElementsByTagName('status')[0].firstChild.data != 'in-use' or
+    volume.getElementsByTagName('volumeType')[0].firstChild.data != 'standard':
+        return -1
+    createTime = volume.getElementsByTagName('createTime')[0].firstChild.data
+    
+    attached_volume = volume.getElementsByTagName('attachmentSet')[0].getElementsByTagName('item')[0]
+    if attached_volume.getElementsByTagName('volumeId')[0].firstChild.data != instance_volumeId or
+    attached_volume.getElementsByTagName('instanceId')[0].firstChild.data != instanceId or
+    attached_volume.getElementsByTagName('device')[0].firstChild.data != '/dev/sda2' or
+    attached_volume.getElementsByTagName('status')[0].firstChild.data != 'attached' or
+    attached_volume.getElementsByTagName('attachTime')[0].firstChild.data != attachTime or
+    attached_volume.getElementsByTagName('attachTime')[0].firstChild.data != createTime:
+        return -1
+    
+    try:
+        gco_url = urllib.urlopen(GetConsoleOutputURL)
+        gco_xml = gco_url.read()
+    except Exception,e:
+        print(e, end='\r\n')
+        return -2
+    try:
+        gco_dom = minidom.parseString(gco_xml)
+        base64output = gco_dom.getElementsByTagName('output')[0].firstChild.data
+        logdata = base64.b64decode(base64output)
+    except Exception,e:
+        print(e, end='\r\n')
+        return -3
+    
+    #Only xvda2 is allowed to be in the log and no other string matchin the regex xvd*
+    if re.search('xvd[^a] | xvda[^2]', logdata) != None:
+        return -1
+    
+    return 1
+
 
 if __name__ == "__main__":
+    check_result = check_oracle_urls(DescribeInstanceURL, DescribeVolumesURL, GetConsoleOutputURL, oracle_address)
+    if check_result != 1:
+        if check_result == -1:
+            print ('A fraudulent oracle detected')
+            exit(1)
+        elif check_result == -2:
+            print ('Could not f the oracle URLs. Try again later')
+            exit(1)
+        elif check_result == -3:
+            print ('Amazon supplied unparsable data. Try again later')
+            exit(1)
+            
+    start_firefox()
     thread = threading.Thread(target= buyer_start_minihttp_thread)
     thread.start()
     
