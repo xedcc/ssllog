@@ -389,7 +389,18 @@ def escrow_thread(conn, sshd_ppid):
                 is_escrow_logged_in = False
                 return
             pubkey, host_ip, port = paralist
-            if (len(pubkey) > 1000) or (int(port) > 65536 if port.isdigit() else True) or (len(host_ip) > 15):
+            
+            input_error = False
+            if (len(pubkey) > 1000) or (len(port)>5) or not port.isdigit() or (len(host_ip) > 15):
+                input_error = True
+            if not input_error:
+                try:
+                    port_int = int(port)
+                    if port_int > 65536: input_error=True
+                except:
+                    input_error = True
+            
+            if input_error:
                 print('finished Faulty data for registering escrow')
                 conn.send('finished Faulty data for registering escrow')
                 time.sleep(1)
