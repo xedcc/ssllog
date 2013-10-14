@@ -166,9 +166,7 @@ def thread_handle_txid(conn, txid, sshd_ppid):
     
     is_logged_in = database[index]['is_logged_in_now']
     prev_sshd_ppid = database[index]['sshd_ppid']
-    prev_sshd_ppid = database[index]['sshd_ppid']
-    prev_sshd_ppid = database[index]['sshd_ppid']
-    prev_sshd_ppid = database[index]['sshd_ppid']
+
     if is_logged_in:
         #check for a stale session from prevous login
         try:
