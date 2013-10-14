@@ -329,7 +329,7 @@ def start_firefox():
         cleanup_and_exit()
 
 #using AWS query API make sure oracle meets the criteria
-def check_oracle_urls (DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutputURL, oracle_dns):
+def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutputURL, oracle_dns):
     try:
         di_url = urllib.urlopen(DescribeInstancesURL)
         di_xml = di_url.read()
@@ -338,34 +338,41 @@ def check_oracle_urls (DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutpu
         return -2
     try:
         di_dom = minidom.parseString(di_xml)
+        if len(di_dom.getElementsByTagName('ErrorResponse')) > 0: return -1
+
+        is_dns_found = False
+        dns_names = di_dom.getElementsByTagName('dnsName')
+        for one_dns_name in dns_names:
+            if one_dns_name.firstChild.data != oracle_dns:
+                continue
+            is_dns_found = True
+            break
+        if not is_dns_found:
+            return -1
+        instance = one_dns_name.parentNode
+    
+        if instance.getElementsByTagName('imageId')[0].firstChild.data != 'ami-d0f89fb9' or\
+        instance.getElementsByTagName('instanceState')[0].getElementsByTagName('name')[0].firstChild.data != 'running' or\
+        instance.getElementsByTagName('rootDeviceName')[0].firstChild.data != '/dev/sda1':
+            return -1
+        launchTime = instance.getElementsByTagName('launchTime')[0].firstChild.data
+        instanceId = instance.getElementsByTagName('instanceId')[0].firstChild.data
+        ownerId = instance.parentNode.parentNode.getElementsByTagName('ownerId')[0].firstChild.data
+        
+        volumes = instance.getElementsByTagName('blockDeviceMapping')[0].getElementsByTagName('item')
+        if len(volumes) > 1: return -1
+        if volumes[0].getElementsByTagName('deviceName')[0].firstChild.data != '/dev/sda2': return -1
+        if volumes[0].getElementsByTagName('ebs')[0].getElementsByTagName('status')[0].firstChild.data != 'attached': return -1
+        instance_volumeId = volumes[0].getElementsByTagName('ebs')[0].getElementsByTagName('volumeId')[0].firstChild.data
+        attachTime = volumes[0].getElementsByTagName('ebs')[0].getElementsByTagName('attachTime')[0].firstChild.data
+        #example of aws time string 2013-10-12T21:17:31.000Z
+        if attachTime[:17] != launchTime[:17]:
+            return -1
+        if int(attachTime[17:19])-int(launchTime[17:19]) > 3:
+            return -1
     except Exception,e:
         print(e, end='\r\n')
         return -3
-    
-    is_dns_found = False
-    dns_names = di_dom.getElementsByTagName('dnsName')
-    for one_dns_name in dns_names:
-        if one_dns_name.firstChild.data != oracle_dns:
-            continue
-        is_dns_found = True
-        break
-    if not is_dns_found:
-        return -1
-    instance = one_dns_name.parentNode
-    
-    if instance.getElementsByTagName('imageId')[0].firstChild.data != 'ami-d0f89fb9' or
-    instance.getElementsByTagName('instanceState')[0].getElementsByTagName('name')[0].firstChild.data != 'running' or
-    instance.getElementsByTagName('rootDeviceName')[0].firstChild.data != '/dev/sda1':
-        return -1
-    launchTime = instance.getElementsByTagName('launchTime')[0].firstChild.data
-    instanceId = instance.getElementsByTagName('instanceId')[0].firstChild.data
-    
-    volumes = instance.getElementsByTagName('blockDeviceMapping')[0].getElementsByTagName('item')
-    if len(volumes) > 1: return -1
-    if volumes[0].getElementsByTagName('deviceName')[0].firstChild.data != '/dev/sda2': return -1
-    if volumes[0].getElementsByTagName('ebs')[0].getElementsByTagName('status')[0].firstChild.data != 'attached': return -1
-    instance_volumeId = volumes[0].getElementsByTagName('ebs')[0].getElementsByTagName('volumeId')[0].firstChild.data
-    attachTime = volumes[0].getElementsByTagName('ebs')[0].getElementsByTagName('attachTime')[0].firstChild.data
     
     try:
         dv_url = urllib.urlopen(DescribeVolumesURL)
@@ -375,35 +382,36 @@ def check_oracle_urls (DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutpu
         return -2
     try:
         dv_dom = minidom.parseString(dv_xml)
+        if len(dv_dom.getElementsByTagName('ErrorResponse')) > 0: return -1
+
+        is_volumeID_found = False
+        volume_IDs = dv_dom.getElementsByTagName('volumeId')
+        for one_volume_ID in volume_IDs:
+            if one_volume_ID.firstChild.data != instance_volumeId:
+                continue
+            is_volumeID_found = True
+            break
+        if not is_volumeID_found:
+            return -1
+        volume = one_volume_ID.parentNode
+    
+        if volume.getElementsByTagName('snapshotId')[0].firstChild.data != oracle_snapID or\
+        volume.getElementsByTagName('status')[0].firstChild.data != 'in-use' or\
+        volume.getElementsByTagName('volumeType')[0].firstChild.data != 'standard':
+            return -1
+        createTime = volume.getElementsByTagName('createTime')[0].firstChild.data
+        
+        attached_volume = volume.getElementsByTagName('attachmentSet')[0].getElementsByTagName('item')[0]
+        if attached_volume.getElementsByTagName('volumeId')[0].firstChild.data != instance_volumeId or\
+        attached_volume.getElementsByTagName('instanceId')[0].firstChild.data != instanceId or\
+        attached_volume.getElementsByTagName('device')[0].firstChild.data != '/dev/sda2' or\
+        attached_volume.getElementsByTagName('status')[0].firstChild.data != 'attached' or\
+        attached_volume.getElementsByTagName('attachTime')[0].firstChild.data != attachTime or\
+        attached_volume.getElementsByTagName('attachTime')[0].firstChild.data != createTime:
+            return -1
     except Exception,e:
         print(e, end='\r\n')
         return -3
-    
-    is_volumeID_found = False
-    volume_IDs = dv_dom.getElementsByTagName('volumeId')
-    for one_volume_ID in volume_IDs:
-        if one_volume_ID.firstChild.data != instance_volumeId:
-            continue
-        is_volumeID_found = True
-        break
-    if not is_volumeID_found:
-        return -1
-    volume = one_volume_ID.parentNode
-    
-    if volume.getElementsByTagName('snapshotId')[0].firstChild.data != oracle_snapID or
-    volume.getElementsByTagName('status')[0].firstChild.data != 'in-use' or
-    volume.getElementsByTagName('volumeType')[0].firstChild.data != 'standard':
-        return -1
-    createTime = volume.getElementsByTagName('createTime')[0].firstChild.data
-    
-    attached_volume = volume.getElementsByTagName('attachmentSet')[0].getElementsByTagName('item')[0]
-    if attached_volume.getElementsByTagName('volumeId')[0].firstChild.data != instance_volumeId or
-    attached_volume.getElementsByTagName('instanceId')[0].firstChild.data != instanceId or
-    attached_volume.getElementsByTagName('device')[0].firstChild.data != '/dev/sda2' or
-    attached_volume.getElementsByTagName('status')[0].firstChild.data != 'attached' or
-    attached_volume.getElementsByTagName('attachTime')[0].firstChild.data != attachTime or
-    attached_volume.getElementsByTagName('attachTime')[0].firstChild.data != createTime:
-        return -1
     
     try:
         gco_url = urllib.urlopen(GetConsoleOutputURL)
@@ -415,28 +423,79 @@ def check_oracle_urls (DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutpu
         gco_dom = minidom.parseString(gco_xml)
         base64output = gco_dom.getElementsByTagName('output')[0].firstChild.data
         logdata = base64.b64decode(base64output)
+        if len(gco_dom.getElementsByTagName('ErrorResponse')) > 0: return -1
+        if gco_dom.getElementsByTagName('instanceId')[0].firstChild.data != instanceId:
+            return -1
+
+        #Only xvda2 is allowed to be in the log and no other string matchin the regex xvd*
+        if re.search('xvd[^a] | xvda[^2]', logdata) != None:
+            return -1
     except Exception,e:
         print(e, end='\r\n')
         return -3
     
-    #Only xvda2 is allowed to be in the log and no other string matchin the regex xvd*
-    if re.search('xvd[^a] | xvda[^2]', logdata) != None:
-        return -1
+    
+    try:
+        lm_url = urllib.urlopen(ListMetricsURL)
+        lm_xml = lm_url.read()
+    except Exception,e:
+        print(e, end='\r\n')
+        return -2
+    try:
+        lm_dom = minidom.parseString(lm_xml)
+        if len(lm_dom.getElementsByTagName('ErrorResponse')) > 0: return -1
+    
+        names = lm_dom.getElementsByTagName('Name')
+        for one_name in names:
+            if one_name.firstChild.data != 'VolumeId': continue
+            if one_name.parentNode.getElementsByTagName('Value')[0].firstChild.data != instance_volumeId: return -1
+    except Exception,e:
+        print(e, end='\r\n')
+        return -3
+         
+         
+    try:
+        gu_url = urllib.urlopen(GetUserURL)
+        gu_xml = gu_url.read()
+    except Exception,e:
+        print(e, end='\r\n')
+        return -2
+    try:
+        gu_dom = minidom.parseString(gu_xml)
+        if len(gu_dom.getElementsByTagName('ErrorResponse')) > 0: return -1
+    
+        names = gu_dom.getElementsByTagName('UserId')
+        if len(names) > 1: return -1
+        arn = gu_dom.getElementsByTagName('Arn')[0].firstChild.data
+        if not arn.endswith(ownerId+":root"): return -1
+    except Exception,e:
+        print(e, end='\r\n')
+        return -3
+    
+    #make sure the same user's AccessKey was used for all URLs
+    try:
+        AccessKeyId = GetUserURL.split('/?AWSAccessKeyId=')[1].split('&')[0]
+        for url in (ListMetricsURL, DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutputURL):
+            if AccessKeyId != url.split('/?AWSAccessKeyId=')[1].split('&')[0] : return -1
+    except Exception,e:
+        print(e, end='\r\n')
+        return -3
+    
     
     return 1
 
 
 if __name__ == "__main__":
-    check_result = check_oracle_urls(DescribeInstanceURL, DescribeVolumesURL, GetConsoleOutputURL, oracle_address)
+    check_result = check_oracle_urls(GetUserURL, ListMetricsURL, DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutputURL, oracle_address)
     if check_result != 1:
         if check_result == -1:
             print ('A fraudulent oracle detected')
             exit(1)
         elif check_result == -2:
-            print ('Could not f the oracle URLs. Try again later')
+            print ('Could not fetch the oracle URLs. Try again later')
             exit(1)
         elif check_result == -3:
-            print ('Amazon supplied unparsable data. Try again later')
+            print ('EC2 supplied unparsable data. Try again later')
             exit(1)
             
     start_firefox()
