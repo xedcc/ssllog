@@ -249,7 +249,7 @@ def thread_handle_txid(conn, txid, sshd_ppid):
     conn.send('Tunnel ready')
         
     
-    #wait for the "finished" signal from the user
+    #wait for sslkey from the user
     last_dos_check = start_time
     conn.settimeout(1 if TESTING else 10)
     msg_in = None
@@ -281,11 +281,21 @@ def thread_handle_txid(conn, txid, sshd_ppid):
                 return
         
         if msg_in: 
-            if msg_in == txid+'-cmd exit':
+            if msg_in.startswith(txid+'-cmd sslkey '):
+                sslkey = msg_in[len(txid+'-cmd sslkey '):]
+                if len(sslkey) > 180:
+                    os.kill(stcppipe_proc.pid, signal.SIGTERM)
+                    time.sleep(3)
+                    shutil.rmtree(logdir)
+                    cleanup_and_exit(conn, msg='Wrong sslkey length', txid=txid)
+                    return
                 os.kill(stcppipe_proc.pid, signal.SIGTERM)
                 time.sleep(3)            
                 finish_time = int(time.time())
                 
+                sslkey_fd = open(os.path.join(logdir,'sslkey'), 'w')
+                sslkey_fd.write(sslkey+'\n')
+                sslkey_fd.close()
                 tar_path = os.path.join(stcppipe_logdir, txid+'.tar')
                 subprocess.call(['tar', 'cf', tar_path, logdir])
                 output = subprocess.check_output(['sha256sum', tar_path])
@@ -308,7 +318,7 @@ def thread_handle_txid(conn, txid, sshd_ppid):
                 os.kill(stcppipe_proc.pid, signal.SIGTERM)
                 time.sleep(3)
                 shutil.rmtree(logdir)
-                cleanup_and_exit(conn, msg='Unknown command received. Expected "exit"', txid=txid)
+                cleanup_and_exit(conn, msg='Unknown command received. Expected "sslkey"', txid=txid)
                 return
     
 

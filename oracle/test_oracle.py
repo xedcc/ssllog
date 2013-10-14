@@ -13,6 +13,7 @@
 #Make sure that "oracle.py testing " and "post_server.py" are running
 #Make sure that this test is run from the same directory where stub.py resides
 
+
 import subprocess
 import select
 import sys
@@ -253,8 +254,8 @@ while 1:
         continue
     
     if not test_send_finished_msg:
-        print ('Sending exit message to user ssh')
-        user_proc.stdin.write('exit\n')
+        print ('Sending sslkey message to user ssh')
+        user_proc.stdin.write('sslkey CLIENT_RANDOM 5256b4caa2f7ac21baf61e56e266b258a046ec15c610a7145bacd49215310383 0fef805068b8a102a11a21a8b02f86cbbba91d0f15faa36ac69d52ec22ffae84f67147f18e7d92036624025deb751e94\n')
         test_send_finished_msg = True
         continue
     
