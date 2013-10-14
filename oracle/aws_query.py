@@ -6,7 +6,7 @@ import urllib
 
 if len(sys.argv) == 1:
     print ('Outputs an HTTP GET link to be used in a browser to check the oracle status')
-    print ('Usage: DescribeInstances/DescribeVolumes/GetConsoleOutput InstanceId=<your instance id>/GetUser AWS-ID AWS-secret')
+    print ('Usage: DescribeInstances/DescribeVolumes/GetConsoleOutput InstanceId=<your instance id>/GetUser/ListMetrics AWS-ID AWS-secret')
     print ('Or alternatively: AWS-secret "string containing all components necessary for building a query separated with &"')
 
 args = []
@@ -22,7 +22,10 @@ if len(sys.argv) >= 4:
     if sys.argv[1] == "GetUser":
         args.append('Version=2010-05-08')
         endpoint = 'iam.amazonaws.com'
-              
+    if sys.argv[1] == "ListMetrics":
+        args.append('Version=2010-08-01')
+        endpoint = 'monitoring.us-east-1.amazonaws.com'
+        
     args += common_args
     args.append('Action='+sys.argv[1])
     args.append('AWSAccessKeyId='+sys.argv[-2])
