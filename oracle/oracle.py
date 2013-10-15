@@ -1,4 +1,4 @@
-import socket,select
+import socket
 import os
 import threading
 import time
@@ -132,8 +132,8 @@ def cleanup_and_exit(conn, txid=0,  msg=''):
     if txid !=0:
         index = get_txid_index_in_db(txid)
         if index < 0:
-            print('finished Transaction ID not found in database')
-            conn.send('finished Transaction ID not found in database')
+            print('Session finished. Transaction ID not found in database')
+            conn.send('Session finished. Transaction ID not found in database')
             time.sleep(1)
             conn.close()
             return
@@ -142,13 +142,13 @@ def cleanup_and_exit(conn, txid=0,  msg=''):
         database[index]['is_logged_in_now'] = False
         __UNLOCK_DB()
         if is_logged_in == False:
-            print('finished Internal error. User was already logged out')
-            conn.send('finished Internal error. User was already logged out')
+            print('Session finished. Internal error. User was already logged out')
+            conn.send('Session finished. Internal error. User was already logged out')
             time.sleep(1)
             conn.close()
             return
-    print('finished ' + msg)
-    conn.send('finished ' + msg)
+    print('Session finished. ' + msg)
+    conn.send('Session finished. ' + msg)
     time.sleep(1)
     conn.close()
       
@@ -261,7 +261,7 @@ def thread_handle_txid(conn, txid, sshd_ppid):
             pass
         current_time = int(time.time())
         if current_time-start_time > 1200:
-            #there was no finished signal for 20 minutes, wrapping up
+            #there was no sslkey for 20 minutes, wrapping up
             os.kill(stcppipe_proc.pid, signal.SIGTERM)
             time.sleep(3)
             shutil.rmtree(logdir)
@@ -314,11 +314,18 @@ def thread_handle_txid(conn, txid, sshd_ppid):
                 cleanup_and_exit(conn, msg='Session ended successfully ', txid=txid)
                 return
             
+            if msg_in == txid+'-cmd exit':
+                os.kill(stcppipe_proc.pid, signal.SIGTERM)
+                time.sleep(3)
+                shutil.rmtree(logdir)
+                cleanup_and_exit(conn, msg='User initiated shutdown', txid=txid)
+                return
+            
             else:
                 os.kill(stcppipe_proc.pid, signal.SIGTERM)
                 time.sleep(3)
                 shutil.rmtree(logdir)
-                cleanup_and_exit(conn, msg='Unknown command received. Expected "sslkey"', txid=txid)
+                cleanup_and_exit(conn, msg='Unknown command received. Expected "sslkey or exit"', txid=txid)
                 return
     
 
@@ -334,8 +341,8 @@ def escrow_thread(conn, sshd_ppid):
         try:
             os.kill(escrow_last_sshd_ppid, 0)
             #if we get here, there was no exception, meaning that the user is indeed still logged in
-            print('finished Escrow is already logged in')
-            conn.send('finished Escrow is already logged in')
+            print('Session finished. Escrow is already logged in')
+            conn.send('Session finished. Escrow is already logged in')
             time.sleep(1)
             conn.close()
             return
@@ -358,23 +365,23 @@ def escrow_thread(conn, sshd_ppid):
             continue
         arglist = args.split()
         if len(arglist) < 2:
-            print('finished Too few arguments')
-            conn.send('finished Too few arguments')
+            print('Session finished. Too few arguments')
+            conn.send('Session finished. Too few arguments')
             time.sleep(1)
             conn.close()
             is_escrow_logged_in = False
             return
         magic, cmd, paralist = arglist[0], arglist[1], arglist[2:]
         if not magic == 'escrow-id-cmd':
-            print('finished Internal error. Wrong magic string')
-            conn.send('finished Internal error. Wrong magic string')
+            print('Session finished. Internal error. Wrong magic string')
+            conn.send('Session finished. Internal error. Wrong magic string')
             time.sleep(1)
             conn.close()
             is_escrow_logged_in = False
             return
         if not is_escrow_registered and not cmd == 'register_escrow':
-            print('finished You must register escrow first ')
-            conn.send('finished You must register escrow first ')
+            print('Session finished. You must register escrow first ')
+            conn.send('Session finished. You must register escrow first ')
             time.sleep(1)
             conn.close()
             is_escrow_logged_in = False
@@ -383,15 +390,15 @@ def escrow_thread(conn, sshd_ppid):
             #This is the very first command that escrow must send after installing this oracle
             #format: register_escrow pubkey escrow_host escrow_port
             if len(paralist) != 3:
-                print('finished Invalid amount of parameters')
-                conn.send('finished Invalid amount of parameters')
+                print('Session finished. Invalid amount of parameters')
+                conn.send('Session finished. Invalid amount of parameters')
                 time.sleep(1)
                 conn.close()
                 is_escrow_logged_in = False
                 return
             if is_escrow_registered:
-                print('finished Escrow already registered')
-                conn.send ('finished Escrow already registered')
+                print('Session finished. Escrow already registered')
+                conn.send ('Session finished. Escrow already registered')
                 time.sleep(1)
                 conn.close()
                 is_escrow_logged_in = False
@@ -409,8 +416,8 @@ def escrow_thread(conn, sshd_ppid):
                     input_error = True
             
             if input_error:
-                print('finished Faulty data for registering escrow')
-                conn.send('finished Faulty data for registering escrow')
+                print('Session finished. Faulty data for registering escrow')
+                conn.send('Session finished. Faulty data for registering escrow')
                 time.sleep(1)
                 conn.close()
                 is_escrow_logged_in = False
@@ -432,8 +439,8 @@ def escrow_thread(conn, sshd_ppid):
         if cmd == 'add_pubkey':
             #format: add_pubkey tx-id pubkey forwarding_port
             if len(paralist) != 3:
-                print('finished Invalid amount of parameters')
-                conn.send('finished Invalid amount of parameters')
+                print('Session finished. Invalid amount of parameters')
+                conn.send('Session finished. Invalid amount of parameters')
                 time.sleep(1)
                 conn.close()
                 is_escrow_logged_in = False
@@ -450,15 +457,15 @@ def escrow_thread(conn, sshd_ppid):
                     input_error = True
                     
             if input_error:
-                print('finished Faulty data for adding a pubkey')
-                conn.send('finished Faulty data for adding a pubkey')
+                print('Session finished. Faulty data for adding a pubkey')
+                conn.send('Session finished. Faulty data for adding a pubkey')
                 time.sleep(1)
                 conn.close()
                 is_escrow_logged_in = False
                 return
             retval = escrow_add_pubkey(txid, pubkey, port)
             if retval[0] == -1:
-                conn.send('finished '+retval[1])
+                conn.send('Session finished. '+retval[1])
                 time.sleep(1)
                 conn.close()
                 is_escrow_logged_in = False
@@ -471,8 +478,8 @@ def escrow_thread(conn, sshd_ppid):
         if cmd == 'get_tarball':
             #format: get_tarball txid
             if len(paralist) != 1:
-                print('finished Invalid amount of parameters')
-                conn.send('finished Invalid amount of parameters')
+                print('Session finished. Invalid amount of parameters')
+                conn.send('Session finished. Invalid amount of parameters')
                 time.sleep(1)
                 conn.close()
                 is_escrow_logged_in = False
@@ -480,8 +487,8 @@ def escrow_thread(conn, sshd_ppid):
             txid = paralist[0]
             retval = escrow_get_tarball(txid)
             if retval[0] == -1:
-                print('finished '+retval[1])
-                conn.send('finished '+retval[1])
+                print('Session finished. '+retval[1])
+                conn.send('Session finished. '+retval[1])
                 time.sleep(1)
                 conn.close()
                 is_escrow_logged_in = False
@@ -493,8 +500,8 @@ def escrow_thread(conn, sshd_ppid):
         
         if cmd == 'get_database':
             if len(paralist) != 0:
-                print('finished Invalid amount of parameters')
-                conn.send('finished Invalid amount of parameters')
+                print('Session finished. Invalid amount of parameters')
+                conn.send('Session finished. Invalid amount of parameters')
                 time.sleep(1)
                 conn.close()
                 is_escrow_logged_in = False
@@ -506,15 +513,15 @@ def escrow_thread(conn, sshd_ppid):
         
         if cmd == 'exit':
             is_escrow_logged_in = False
-            print('finished Escrow initiated disconnect')
-            conn.send('finished Escrow initiated disconnect')
+            print('Session finished. Escrow initiated disconnect')
+            conn.send('Session finished. Escrow initiated disconnect')
             time.sleep(1)
             conn.close()
             return
                    
         else:
-            print('finished Unrecognized command')
-            conn.send('finished Unrecognized command')
+            print('Session finished. Unrecognized command')
+            conn.send('Session finished. Unrecognized command')
             time.sleep(1)
             conn.close()
             is_escrow_logged_in = False
@@ -581,8 +588,8 @@ if __name__ == "__main__":
         args = conn.recv(1024)
         arglist = args.split()
         if len(arglist) != 2:
-            print('finished Internal error. Did not receive two arguments as expected')
-            conn.send('finished Internal error. Did not receive two arguments as expected')
+            print('Session finished. Internal error. Did not receive two arguments as expected')
+            conn.send('Session finished. Internal error. Did not receive two arguments as expected')
             time.sleep(1)
             conn.close()
             continue
