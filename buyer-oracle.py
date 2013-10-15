@@ -31,6 +31,7 @@ ssh_exepath = 'ssh'
 ssh_logfile = os.path.join(installdir, 'ssh.log')
 #ssh_exepath = os.path.join(installdir, 'putty')
 buyer_http_port = 2222
+random_stcppipe_port = 0
 oracle_snapID ='snap-f2596bf0'
 
 accno = None
@@ -74,30 +75,43 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
                 sum_ = params[1]['sum']
             
             result = find_page(accno, sum_)
-            if result == False:
-                print ('sending failure',end='\r\n')
+            if result[0] != 'success':
+                print ('sending failure. Reason: '+result[0] ,end='\r\n')
                 self.send_response(200)
                 self.send_header("response", "page_marked")
                 self.send_header("value", "failure")
                 super(buyer_HandlerClass, self).do_HEAD()
                 self.server.retval = 'failure'
                 self.server.stop = True
-            else:
-                filename, frames_no = result
-                if is_clear_cache_needed(filename, frames_no):    
-                    self.send_response(200)
-                    self.send_header("response", "page_marked")
-                    self.send_header("value", "clear_ssl_cache")
-                    print ('sending clear_ssl_cache',end='\r\n')
-                    super(buyer_HandlerClass, self).do_HEAD()
-                else:
-                    self.send_response(200)
-                    self.send_header("response", "page_marked")
-                    self.send_header("value", "success")
-                    print ('sending success',end='\r\n')
-                    super(buyer_HandlerClass, self).do_HEAD()
-                    self.server.retval = 'success'
-                    self.server.stop = True
+                return
+            #else
+            filename, frames_no = result[1:3]
+            if is_clear_cache_needed(filename, frames_no):    
+                self.send_response(200)
+                self.send_header("response", "page_marked")
+                self.send_header("value", "clear_ssl_cache")
+                print ('sending clear_ssl_cache',end='\r\n')
+                super(buyer_HandlerClass, self).do_HEAD()
+                return
+            #else
+            retval = extract_ssl_key(filename)
+            if retval != 'success':
+                self.send_response(200)
+                self.send_header("response", "page_marked")
+                self.send_header("value", "failure")
+                super(buyer_HandlerClass, self).do_HEAD()
+                self.server.retval = 'failure'
+                self.server.stop = True
+                return
+            #else
+            self.send_response(200)
+            self.send_header("response", "page_marked")
+            self.send_header("value", "success")
+            print ('sending success',end='\r\n')
+            super(buyer_HandlerClass, self).do_HEAD()
+            self.server.retval = 'success'
+            self.server.stop = True
+            return
                 
 
 #look at tshark's ascii dump to better understand the parsing taking place
@@ -174,6 +188,7 @@ def get_html_from_asciidump(ascii_dump):
     
 
 def find_page(accno, amount):
+    global random_stcppipe_port
     filelist = os.listdir(logdir)
     timestamps = []
     for f in filelist:
@@ -184,7 +199,7 @@ def find_page(accno, amount):
     for index, timestamp in enumerate(timestamps):
         print ('Processing file No:'+str(index), end='\r\n')
         filename = timestamp[0]
-        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html', '-o', 'ssl.keylog_file:'+ sslkeylog, '-x'])
+        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html', '-o', 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_stcppipe_port), '-x'])
         if output == '': continue
         #multiple frames are dumped ascendingly. Process from the latest to the earlier.
         frames = output.split('\n\nFrame (')
@@ -195,15 +210,15 @@ def find_page(accno, amount):
             html = get_html_from_asciidump(frame)
             if html == -1:
                 print ('Error processing ascii dump in file:'+filename, end='\r\n')
-                return False
+                return ['Error processing ascii dump in file:'+filename]
             if html.find(accno) == -1:
                 print ('Accno not found in HTML', end='\r\n')
                 continue
             if html.find(amount) == -1:
                 print ('Amount not found in HTML', end='\r\n')
                 continue
-            return filename, len(frames)
-    return False
+            return ['success', filename, len(frames)]
+    return ['Data not found in HTML']
 
 
 #make sure there is no unwanted data (other HTML or POSTs) in that file/TCP stream
@@ -211,7 +226,7 @@ def is_clear_cache_needed(filename, frames_no):
     if frames_no > 1:
         print ('Extra HTML file found in the TCP stream', end='\r\n')
         return True
-    output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.request.method==POST', '-o', 'ssl.keylog_file:'+ sslkeylog])
+    output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.request.method==POST', '-o', 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_stcppipe_port)])
     if output != '':
         print ('POST request found in the TCP stream', end='\r\n')
         return True
@@ -233,7 +248,7 @@ def extract_ssl_key(filename):
         tmpkey_fd.write(key+'\n')
         tmpkey_fd.flush()
         tmpkey_fd.close()
-        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html', '-o', 'ssl.keylog_file:'+ sslkey])
+        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html', '-o', 'ssl.keylog_file:'+ sslkey, '-o', 'http.ssl.port:'+str(random_stcppipe_port)])
         if output == '': continue        
         #else key found
         
@@ -243,16 +258,16 @@ def extract_ssl_key(filename):
         filelist.remove(filename)
         mergecap_args = ['mergecap', '-w', 'merged'] + filelist
         subprocess.call(mergecap_args, cwd=logdir)
-        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http', '-o', 'ssl.keylog_file:'+ sslkey])
+        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http', '-o', 'ssl.keylog_file:'+ sslkey, '-o',  'http.ssl.port:'+str(random_stcppipe_port)])
         if output != '':
             print ('The unthinkable happened. Our ssl key can decrypt another tcp stream', end='\r\n')
             exit(4)
             
         print ('SUCCESS unique ssl key found', end='\r\n')
-        return True
+        return 'success'
         
-    print ('FAILURE could not find ssl key ', end='\r\n')
-    return False
+    print ('FAILURE could not find ssl key', end='\r\n')
+    return 'FAILURE could not find ssl key'
     
     
 #use miniHTTP server to receive commands from Firefox addon and respond to them
@@ -500,12 +515,13 @@ def setup_tunnel(privkey_file, oracle_address, assigned_port):
     if os.path.isdir(logdir) : shutil.rmtree(logdir)
     os.mkdir(logdir)
     
-    randomport = random.randint(1025,65535)
-    stcppipe_proc = subprocess.Popen([stcppipe_exepath, '-d', logdir, '-b', '127.0.0.1', str(randomport), '8080'])
+    global random_stcppipe_port
+    random_stcppipe_port = random.randint(1025,65535)
+    stcppipe_proc = subprocess.Popen([stcppipe_exepath, '-d', logdir, '-b', '127.0.0.1', str(random_stcppipe_port), '8080'])
     time.sleep(1)
     if stcppipe_proc.poll() != None:
         return ['stcppipe error']
-    ssh_proc = subprocess.Popen([ssh_exepath, '-i', privkey_file, '-o', 'StrictHostKeyChecking=no', 'ubuntu@'+oracle_address, '-L', str(randomport)+':localhost:'+assigned_port], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    ssh_proc = subprocess.Popen([ssh_exepath, '-i', privkey_file, '-o', 'StrictHostKeyChecking=no', 'ubuntu@'+oracle_address, '-L', str(random_stcppipe_port)+':localhost:'+assigned_port], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     #give sshd some time to disconnect us if it has to 
     time.sleep(3)
     if ssh_proc.poll() != None:
@@ -525,11 +541,12 @@ def setup_tunnel(privkey_file, oracle_address, assigned_port):
             os.kill(stcppipe_proc.pid, signal.SIGTERM)
             sshlog_fd.close()            
             return ['select error']
-        if not cmd: continue
         cmd = ssh_proc.stderr.readline()
+        if not cmd: continue        
         sshlog_fd.write(cmd+'\n')
+        sshlog_fd.flush()
         if cmd.startswith('Session finished. Please reconnect and use port '):
-            newport = cmd['Session finished. Please reconnect and use port ':].split()[0]
+            newport = cmd[len('Session finished. Please reconnect and use port '):].split()[0]
             if len(newport) < 4 or len(newport)>5:
                 os.kill(stcppipe_proc.pid, signal.SIGTERM)
                 sshlog_fd.close()                
@@ -608,7 +625,7 @@ if __name__ == "__main__":
         ssh_proc.stdin.write('exit\n')
         exit(1)
     
-    sslkey_fd = open(os.join.path(logdir,'tmpkey'), 'r')
+    sslkey_fd = open(sslkey, 'r')
     key_data = sslkey_fd.read()
     sslkey_fd.close()
     ssh_proc.stdin.write('sslkey '+key_data+'\n')
