@@ -142,11 +142,10 @@ while 1:
         data_in = s.recv(4096)
         sys.stderr.write(data_in+'\n')
         sys.stderr.flush()
-        if data_in.startswith('finished'):
+        if data_in.startswith('Session finished.'):
             sys.stderr.write('Received finished signal\n')
             sys.stderr.flush()
             time.sleep(1)
-            os.kill(sshd_ppid, signal.SIGTERM)
             break
         
 s.close()

@@ -111,9 +111,9 @@ while 1:
                     is_pubkey_added = True
                 elif data.startswith('Tarball successfully sent'):
                     is_hash_matched = True
-                elif data.startswith('finished Escrow reported hash mismatch'):
+                elif data.startswith('Session finished. Escrow reported hash mismatch'):
                     is_hash_matched = True
-                elif data.startswith('finished Escrow initiated disconnect'):
+                elif data.startswith('Session finished. Escrow initiated disconnect'):
                     is_escrow_loggedout = True
                 continue
             if fd == user_stderr:
@@ -126,7 +126,7 @@ while 1:
                 if data.startswith('database'):
                     is_user_db_ready = True
                     user_db = data
-                if data.startswith('finished Session ended successfully'):
+                if data.startswith('Session finished. Session ended successfully'):
                     is_user_session_finished = True
                 continue
             if fd == user2_stderr:
@@ -137,7 +137,7 @@ while 1:
                 if data.startswith('database'):
                     is_user2_db_ready = True
                     user2_db = data
-                if data.startswith('finished Session ended successfully'):
+                if data.startswith('Session finished. Session ended successfully'):
                     is_user2_session_finished = True
                 continue
             if fd == user3_stderr:
@@ -145,13 +145,13 @@ while 1:
                 if not data: continue
                 was_data = True
                 print ('user3 ssh>>> '+data)
-                if data.startswith('finished Please reconnect and use port'):
+                if data.startswith('Session finished. Please reconnect and use port'):
                     is_user3_newport_received = True
-                    user3_new_port = data[len('finished Please reconnect and use port'):].split()[0]
+                    user3_new_port = data[len('Session finished. Please reconnect and use port'):].split()[0]
                 if data.startswith('database'):
                     is_user3_db_ready = True
                     user3_db = data
-                if data.startswith('finished Session ended successfully'):
+                if data.startswith('Session finished. Session ended successfully'):
                     is_user3_session_finished = True
                 continue
     if was_data: continue
