@@ -1,22 +1,47 @@
 from __future__ import print_function
 
+import base64
+import BaseHTTPServer
 import os
+import random
+import re
+import select
+import shutil
+import signal
+import SimpleHTTPServer
 import subprocess
 import sys
-import BaseHTTPServer, SimpleHTTPServer
 import threading
+import time
 import urllib
 from xml.dom import minidom
-import base64
 
-logdir = '/home/default2/Desktop/sslxchange/oracle/logs'
-sslkeylog = '/home/default2/Desktop/sslkeylog'
+TESTING = True
+#ALPHA_TESTING means the users have to enter accno and sum themselves via FF addon
+ALPHA_TESTING = False
+
+
+installdir = os.path.dirname(os.path.realpath(__file__))
+logdir = os.path.join(installdir, 'stcppipelogs')
+sslkeylog = os.path.join(installdir, 'sslkeylog')
+sslkey = os.path.join(installdir, 'sslkey')
+stcppipe_exepath = os.path.join(installdir, 'oracle','stcppipe')
+firefox_exepath = '/home/default2/Desktop/firefox-nightly/firefox'
+ssh_exepath = 'ssh'
+ssh_logfile = os.path.join(installdir, 'ssh.log')
+#ssh_exepath = os.path.join(installdir, 'putty')
 buyer_http_port = 2222
-oracle_snapID ='snap-1a8f0718'
+oracle_snapID ='snap-f2596bf0'
 
-ALPHA_TESTING = True
 accno = None
 sum_ = None
+
+#a thread which returns a value. This is achieved passing self as the first argument to a called function
+#the calling function can then set self.retval
+class ThreadWithRetval(threading.Thread):
+    def __init__(self, target):
+        super(ThreadWithRetval, self).__init__(target=target, args = (self,))
+    retval = ''
 
 class StoppableHttpServer (BaseHTTPServer.HTTPServer):
     """http server that reacts to self.stop flag"""
@@ -29,7 +54,7 @@ class StoppableHttpServer (BaseHTTPServer.HTTPServer):
         return self.retval;
     
 #handle only paths we are interested and let python handle the response headers
-#class "object" in needed to access super()
+#class "object" is needed to access super()
 class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
     protocol_version = "HTTP/1.1"      
     
@@ -55,6 +80,8 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
                 self.send_header("response", "page_marked")
                 self.send_header("value", "failure")
                 super(buyer_HandlerClass, self).do_HEAD()
+                self.server.retval = 'failure'
+                self.server.stop = True
             else:
                 filename, frames_no = result
                 if is_clear_cache_needed(filename, frames_no):    
@@ -69,15 +96,9 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
                     self.send_header("value", "success")
                     print ('sending success',end='\r\n')
                     super(buyer_HandlerClass, self).do_HEAD()
-                    extract_ssl_key(filename)
-             
-        elif self.path == '/tempdir':
-            self.send_response(200)
-            self.send_header("response", "tempdir")
-            self.send_header("value", os.path.join(installdir, 'firefox', 'dummy'))
-            super(buyer_HandlerClass, self).do_HEAD()
-            
-            
+                    self.server.retval = 'success'
+                    self.server.stop = True
+                
 
 #look at tshark's ascii dump to better understand the parsing taking place
 def get_html_from_asciidump(ascii_dump):
@@ -86,7 +107,7 @@ def get_html_from_asciidump(ascii_dump):
 
     if ascii_dump == '':
         print ('empty frame dump',end='\r\n')
-        return 1
+        return -1
 
     #We are interested in
     # "Uncompressed entity body" for compressed HTML (both chunked and not chunked). If not present, then
@@ -152,7 +173,7 @@ def get_html_from_asciidump(ascii_dump):
    
     
 
-def find_page(accno=None, amount=None):
+def find_page(accno, amount):
     filelist = os.listdir(logdir)
     timestamps = []
     for f in filelist:
@@ -173,7 +194,7 @@ def find_page(accno=None, amount=None):
         for frame in frames:
             html = get_html_from_asciidump(frame)
             if html == -1:
-                print ('Error processing ascii dump if file:'+filename, end='\r\n')
+                print ('Error processing ascii dump in file:'+filename, end='\r\n')
                 return False
             if html.find(accno) == -1:
                 print ('Accno not found in HTML', end='\r\n')
@@ -184,16 +205,18 @@ def find_page(accno=None, amount=None):
             return filename, len(frames)
     return False
 
+
 #make sure there is no unwanted data (other HTML or POSTs) in that file/TCP stream
 def is_clear_cache_needed(filename, frames_no):
     if frames_no > 1:
         print ('Extra HTML file found in the TCP stream', end='\r\n')
         return True
-    output = output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.request.method==POST', '-o', 'ssl.keylog_file:'+ sslkeylog])
+    output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.request.method==POST', '-o', 'ssl.keylog_file:'+ sslkeylog])
     if output != '':
         print ('POST request found in the TCP stream', end='\r\n')
         return True
     return False
+
 
 def extract_ssl_key(filename):
     #find the key which decrypts out tcp stream
@@ -202,16 +225,15 @@ def extract_ssl_key(filename):
     sslkey_fd.close()
     keys = keys_data.rstrip().split('\n')
     keys.reverse()
-    tmpkey_path = os.path.join(logdir, 'tmpkey')
     print ('SSL keys needed to be processed:' + str(len(keys)), end='\r\n')
     for index,key in enumerate(keys):
         print ('Processing key number:' + str(index), end='\r\n')
         if not key.startswith('CLIENT_RANDOM'): continue
-        tmpkey_fd = open(tmpkey_path, 'w')
+        tmpkey_fd = open(sslkey, 'w')
         tmpkey_fd.write(key+'\n')
         tmpkey_fd.flush()
         tmpkey_fd.close()
-        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html', '-o', 'ssl.keylog_file:'+ tmpkey_path])
+        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html', '-o', 'ssl.keylog_file:'+ sslkey])
         if output == '': continue        
         #else key found
         
@@ -219,10 +241,9 @@ def extract_ssl_key(filename):
         #merge all files sans our file and check against the key
         filelist = os.listdir(logdir)
         filelist.remove(filename)
-        filelist.remove('tmpkey')
         mergecap_args = ['mergecap', '-w', 'merged'] + filelist
         subprocess.call(mergecap_args, cwd=logdir)
-        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http', '-o', 'ssl.keylog_file:'+ tmpkey_path])
+        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http', '-o', 'ssl.keylog_file:'+ sslkey])
         if output != '':
             print ('The unthinkable happened. Our ssl key can decrypt another tcp stream', end='\r\n')
             exit(4)
@@ -235,7 +256,7 @@ def extract_ssl_key(filename):
     
     
 #use miniHTTP server to receive commands from Firefox addon and respond to them
-def buyer_start_minihttp_thread():
+def buyer_start_minihttp_thread(parentthread):
     print ('Starting mini http server to communicate with Firefox plugin',end='\r\n')
     try:
         httpd = StoppableHttpServer(('127.0.0.1', buyer_http_port), buyer_HandlerClass)
@@ -244,7 +265,10 @@ def buyer_start_minihttp_thread():
         #cleanup_and_exit()
     sa = httpd.socket.getsockname()
     print ("Serving HTTP on", sa[0], "port", sa[1], "...",end='\r\n')
-    httpd.serve_forever()
+    retval = httpd.serve_forever()
+    #after the server was stopped
+    parentthread.retval = retval
+
 
 def start_firefox():
     #we could ask user to run Firefox with -ProfileManager and create a new profile themselves
@@ -253,7 +277,7 @@ def start_firefox():
     homedir = os.path.expanduser("~")
     if homedir == "~":
         print ("Couldn't find user's home directory",end='\r\n')
-        cleanup_and_exit()
+        return "Couldn't find user's home directory"
     #todo allow user to specify firefox profile dir manually 
     ff_user_dir = os.path.join(homedir, ".mozilla", "firefox")   
     # skip this step if "ssllog" profile already exists
@@ -264,7 +288,7 @@ def start_firefox():
             inifile = open(os.path.join(ff_user_dir, "profiles.ini"), "r+a")
         except Exception,e: 
             print ('Could not open profiles.ini. Make sure it exists and you have sufficient read/write permissions',e,end='\r\n')
-            cleanup_and_exit()
+            return 'Could not open profiles.ini'
         text = inifile.read()
    
         #get the last profile number and increase it by 1 for our profile
@@ -274,7 +298,7 @@ def start_firefox():
             inifile.write('[Profile' +str(our_profile_number) + ']\nName=ssllog\nIsRelative=1\nPath=ssllog_profile\n\n')
         except Exception,e:
             print ('Could not write to profiles.ini. Make sure you have sufficient write permissions',e,end='\r\n')
-            cleanup_and_exit()
+            return 'Could not write to profiles.ini'
         inifile.close()
     
         #create an extension dir and copy the extension files
@@ -288,45 +312,32 @@ def start_firefox():
             mfile = open (os.path.join(ff_extensions_dir, "sample@example.net"), "w+")
         except Exception,e:
             print ('File open error', e,end='\r\n')
-            cleanup_and_exit()
-        #todo print line number in error messages
+            return 'File open error'
         
         #write the path into the file
         try:
             mfile.write(os.path.join(ff_extensions_dir, "ssllog_addon"))
         except Exception,e:
             print ('File write error', e,end='\r\n')
-            cleanup_and_exit()
+            return 'File write error'
         
         try:    
             shutil.copytree(os.path.join(installdir,"FF-addon"), os.path.join(ff_extensions_dir, "ssllog_addon"))
         except Exception,e:
             print ('Error copying addon from installdir',e,end='\r\n') 
-            cleanup_and_exit()
-    
-    #empty html files from previous session
-    for the_file in os.listdir(htmldir):
-        file_path = os.path.join(htmldir, the_file)
-        try:
-            if os.path.isdir(file_path): 
-                shutil.rmtree(file_path)
-            else:
-                os.unlink(file_path)
-        except Exception, e:
-            print ('Error while removing html files from previous session',e,end='\r\n')
-            cleanup_and_exit()
+            return 'Error copying addon from installdir'
 
     #SSLKEYLOGFILE
-    sslkeylogfile_path = os.path.join(installdir, 'dumpcap', 'sslkeylog')
-    os.putenv("SSLKEYLOGFILE", sslkeylogfile_path)
-    #TMP is where the html files are going to be saved
-    os.putenv("TMP", os.path.join(installdir, 'htmldir'))
+    os.putenv("SSLKEYLOGFILE", sslkeylog)
     print ("Starting a new instance of Firefox with a new profile",end='\r\n')
     try:
         subprocess.Popen([firefox_exepath,'-new-instance', '-P', 'ssllog'], stdout=open(os.path.join(installdir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(installdir, 'firefox', "firefox.stderr"), 'w'))
     except Exception,e:
         print ("Error starting Firefox", e,end='\r\n')
-        cleanup_and_exit()
+        return "Error starting Firefox"
+    
+    return 'success'
+
 
 #using AWS query API make sure oracle meets the criteria
 def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutputURL, oracle_dns):
@@ -335,10 +346,10 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
         di_xml = di_url.read()
     except Exception,e:
         print(e, end='\r\n')
-        return -2
+        return 'error in urllib'
     try:
         di_dom = minidom.parseString(di_xml)
-        if len(di_dom.getElementsByTagName('ErrorResponse')) > 0: return -1
+        if len(di_dom.getElementsByTagName('ErrorResponse')) > 0: return 'bad oracle'
 
         is_dns_found = False
         dns_names = di_dom.getElementsByTagName('dnsName')
@@ -348,41 +359,41 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
             is_dns_found = True
             break
         if not is_dns_found:
-            return -1
+            return 'bad oracle'
         instance = one_dns_name.parentNode
     
         if instance.getElementsByTagName('imageId')[0].firstChild.data != 'ami-d0f89fb9' or\
         instance.getElementsByTagName('instanceState')[0].getElementsByTagName('name')[0].firstChild.data != 'running' or\
         instance.getElementsByTagName('rootDeviceName')[0].firstChild.data != '/dev/sda1':
-            return -1
+            return 'bad oracle'
         launchTime = instance.getElementsByTagName('launchTime')[0].firstChild.data
         instanceId = instance.getElementsByTagName('instanceId')[0].firstChild.data
         ownerId = instance.parentNode.parentNode.getElementsByTagName('ownerId')[0].firstChild.data
         
         volumes = instance.getElementsByTagName('blockDeviceMapping')[0].getElementsByTagName('item')
-        if len(volumes) > 1: return -1
-        if volumes[0].getElementsByTagName('deviceName')[0].firstChild.data != '/dev/sda2': return -1
-        if volumes[0].getElementsByTagName('ebs')[0].getElementsByTagName('status')[0].firstChild.data != 'attached': return -1
+        if len(volumes) > 1: return 'bad oracle'
+        if volumes[0].getElementsByTagName('deviceName')[0].firstChild.data != '/dev/sda2': return 'bad oracle'
+        if volumes[0].getElementsByTagName('ebs')[0].getElementsByTagName('status')[0].firstChild.data != 'attached': return 'bad oracle'
         instance_volumeId = volumes[0].getElementsByTagName('ebs')[0].getElementsByTagName('volumeId')[0].firstChild.data
         attachTime = volumes[0].getElementsByTagName('ebs')[0].getElementsByTagName('attachTime')[0].firstChild.data
         #example of aws time string 2013-10-12T21:17:31.000Z
         if attachTime[:17] != launchTime[:17]:
-            return -1
+            return 'bad oracle'
         if int(attachTime[17:19])-int(launchTime[17:19]) > 3:
-            return -1
+            return 'bad oracle'
     except Exception,e:
         print(e, end='\r\n')
-        return -3
+        return 'bad data from Amazon'
     
     try:
         dv_url = urllib.urlopen(DescribeVolumesURL)
         dv_xml = dv_url.read()
     except Exception,e:
         print(e, end='\r\n')
-        return -2
+        return 'error in urllib'
     try:
         dv_dom = minidom.parseString(dv_xml)
-        if len(dv_dom.getElementsByTagName('ErrorResponse')) > 0: return -1
+        if len(dv_dom.getElementsByTagName('ErrorResponse')) > 0: return 'bad oracle'
 
         is_volumeID_found = False
         volume_IDs = dv_dom.getElementsByTagName('volumeId')
@@ -392,13 +403,13 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
             is_volumeID_found = True
             break
         if not is_volumeID_found:
-            return -1
+            return 'bad oracle'
         volume = one_volume_ID.parentNode
     
         if volume.getElementsByTagName('snapshotId')[0].firstChild.data != oracle_snapID or\
         volume.getElementsByTagName('status')[0].firstChild.data != 'in-use' or\
         volume.getElementsByTagName('volumeType')[0].firstChild.data != 'standard':
-            return -1
+            return 'bad oracle'
         createTime = volume.getElementsByTagName('createTime')[0].firstChild.data
         
         attached_volume = volume.getElementsByTagName('attachmentSet')[0].getElementsByTagName('item')[0]
@@ -408,31 +419,31 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
         attached_volume.getElementsByTagName('status')[0].firstChild.data != 'attached' or\
         attached_volume.getElementsByTagName('attachTime')[0].firstChild.data != attachTime or\
         attached_volume.getElementsByTagName('attachTime')[0].firstChild.data != createTime:
-            return -1
+            return 'bad oracle'
     except Exception,e:
         print(e, end='\r\n')
-        return -3
+        return 'bad data from Amazon'
     
     try:
         gco_url = urllib.urlopen(GetConsoleOutputURL)
         gco_xml = gco_url.read()
     except Exception,e:
         print(e, end='\r\n')
-        return -2
+        return 'error in urllib'
     try:
         gco_dom = minidom.parseString(gco_xml)
         base64output = gco_dom.getElementsByTagName('output')[0].firstChild.data
         logdata = base64.b64decode(base64output)
-        if len(gco_dom.getElementsByTagName('ErrorResponse')) > 0: return -1
+        if len(gco_dom.getElementsByTagName('ErrorResponse')) > 0: return 'bad oracle'
         if gco_dom.getElementsByTagName('instanceId')[0].firstChild.data != instanceId:
-            return -1
+            return 'bad oracle'
 
         #Only xvda2 is allowed to be in the log and no other string matchin the regex xvd*
         if re.search('xvd[^a] | xvda[^2]', logdata) != None:
-            return -1
+            return 'bad oracle'
     except Exception,e:
         print(e, end='\r\n')
-        return -3
+        return 'bad data from Amazon'
     
     
     try:
@@ -440,18 +451,19 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
         lm_xml = lm_url.read()
     except Exception,e:
         print(e, end='\r\n')
-        return -2
+        return 'error in urllib'
     try:
         lm_dom = minidom.parseString(lm_xml)
-        if len(lm_dom.getElementsByTagName('ErrorResponse')) > 0: return -1
+        if len(lm_dom.getElementsByTagName('ErrorResponse')) > 0: return 'bad oracle'
     
         names = lm_dom.getElementsByTagName('Name')
         for one_name in names:
-            if one_name.firstChild.data != 'VolumeId': continue
-            if one_name.parentNode.getElementsByTagName('Value')[0].firstChild.data != instance_volumeId: return -1
+            if (one_name.firstChild.data == 'VolumeId' and one_name.parentNode.getElementsByTagName('Value')[0].firstChild.data != instance_volumeId) or (one_name.firstChild.data == 'InstanceId' and one_name.parentNode.getElementsByTagName('Value')[0].firstChild.data != instanceId):
+                print ('Too many volumes or instances detected')
+                #return 'bad oracle'
     except Exception,e:
         print(e, end='\r\n')
-        return -3
+        return 'bad data from Amazon'
          
          
     try:
@@ -459,47 +471,147 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
         gu_xml = gu_url.read()
     except Exception,e:
         print(e, end='\r\n')
-        return -2
+        return 'error in urllib'
     try:
         gu_dom = minidom.parseString(gu_xml)
-        if len(gu_dom.getElementsByTagName('ErrorResponse')) > 0: return -1
+        if len(gu_dom.getElementsByTagName('ErrorResponse')) > 0: return 'bad oracle'
     
         names = gu_dom.getElementsByTagName('UserId')
-        if len(names) > 1: return -1
+        if len(names) > 1: return 'bad oracle'
         arn = gu_dom.getElementsByTagName('Arn')[0].firstChild.data
-        if not arn.endswith(ownerId+":root"): return -1
+        if not arn.endswith(ownerId+":root"): return 'bad oracle'
     except Exception,e:
         print(e, end='\r\n')
-        return -3
+        return 'bad data from Amazon'
     
-    #make sure the same user's AccessKey was used for all URLs
+    #make sure the same root's AccessKey was used for all URLs
     try:
         AccessKeyId = GetUserURL.split('/?AWSAccessKeyId=')[1].split('&')[0]
         for url in (ListMetricsURL, DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutputURL):
-            if AccessKeyId != url.split('/?AWSAccessKeyId=')[1].split('&')[0] : return -1
+            if AccessKeyId != url.split('/?AWSAccessKeyId=')[1].split('&')[0] : return 'bad oracle'
     except Exception,e:
         print(e, end='\r\n')
-        return -3
+        return 'bad data from Amazon'
+       
+    return 'success'
+
+
+def setup_tunnel(privkey_file, oracle_address, assigned_port):
+    if os.path.isdir(logdir) : shutil.rmtree(logdir)
+    os.mkdir(logdir)
+    
+    randomport = random.randint(1025,65535)
+    stcppipe_proc = subprocess.Popen([stcppipe_exepath, '-d', logdir, '-b', '127.0.0.1', str(randomport), '8080'])
+    time.sleep(1)
+    if stcppipe_proc.poll() != None:
+        return ['stcppipe error']
+    ssh_proc = subprocess.Popen([ssh_exepath, '-i', privkey_file, '-o', 'StrictHostKeyChecking=no', 'ubuntu@'+oracle_address, '-L', str(randomport)+':localhost:'+assigned_port], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    #give sshd some time to disconnect us if it has to 
+    time.sleep(3)
+    if ssh_proc.poll() != None:
+        return ['ssh error']
+    #give sshd 30 secs to respond with 'Tunnel ready'
+    waiting_started = time.time()
+    sshlog_fd = open(ssh_logfile, 'w')
+    while 1:
+        rlist = select.select([ssh_proc.stderr],[],[], 1)[0]
+        if len(rlist) == 0:
+            if time.time() - waiting_started > 30:
+                os.kill(stcppipe_proc.pid, signal.SIGTERM)
+                sshlog_fd.close()
+                return ['sshd response timeout']
+            continue
+        if ssh_proc.stderr not in rlist:
+            os.kill(stcppipe_proc.pid, signal.SIGTERM)
+            sshlog_fd.close()            
+            return ['select error']
+        if not cmd: continue
+        cmd = ssh_proc.stderr.readline()
+        sshlog_fd.write(cmd+'\n')
+        if cmd.startswith('Session finished. Please reconnect and use port '):
+            newport = cmd['Session finished. Please reconnect and use port ':].split()[0]
+            if len(newport) < 4 or len(newport)>5:
+                os.kill(stcppipe_proc.pid, signal.SIGTERM)
+                sshlog_fd.close()                
+                return ['newport length error']
+            os.kill(stcppipe_proc.pid, signal.SIGTERM)
+            sshlog_fd.close()
+            return ['reconnect',newport]
+        if cmd.startswith('Session finished.'): 
+            os.kill(stcppipe_proc.pid, signal.SIGTERM)            
+            sshlog_fd.close()            
+            return 'session finished'
+        if cmd.startswith('Tunnel ready'): 
+            sshlog_fd.close()
+            return ['success', stcppipe_proc, ssh_proc]
     
     
-    return 1
+
 
 
 if __name__ == "__main__":
-    check_result = check_oracle_urls(GetUserURL, ListMetricsURL, DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutputURL, oracle_address)
-    if check_result != 1:
-        if check_result == -1:
-            print ('A fraudulent oracle detected')
-            exit(1)
-        elif check_result == -2:
-            print ('Could not fetch the oracle URLs. Try again later')
-            exit(1)
-        elif check_result == -3:
-            print ('EC2 supplied unparsable data. Try again later')
-            exit(1)
-            
-    start_firefox()
-    thread = threading.Thread(target= buyer_start_minihttp_thread)
+    if len(sys.argv) != 11:
+        print ("10 arguments expected separated by a space in this sequence:")
+        print ("GetUserURL, ListMetricsURL, DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutputURL")
+        print ("oracle DNS, private key file, assigned port, account number, sum")
+    GetUserURL = sys.argv[1]
+    ListMetricsURL = sys.argv[2]
+    DescribeInstancesURL= sys.argv[3]
+    DescribeVolumesURL= sys.argv[4]
+    GetConsoleOutputURL= sys.argv[5]
+    oracle_address= sys.argv[6]
+    privkey= sys.argv[7]
+    assigned_port= sys.argv[8]
+    global accno
+    global sum_
+    accno= sys.argv[9]
+    sum_= sys.argv[10]
+    
+    #check_result = check_oracle_urls(GetUserURL, ListMetricsURL, DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutputURL, oracle_dns)
+    #if check_result != 'success':
+        #print ('Error checking oracle: '+check_result)
+        #exit(1)
+    
+    setup_result = setup_tunnel(privkey, oracle_address, assigned_port)
+    if setup_result[0] == 'reconnect':
+        print ('Reconnecting to sshd', end='\r\n')
+        setup_result = setup_tunnel(privkey, oracle_address, setup_result[1])
+    if setup_result[0] != 'success':
+        print ('Error while setting up a tunnel: '+setup_result[0], end='\r\n')
+        exit(1)
+    stcppipe_proc, ssh_proc = setup_result[1:]
+               
+    thread = ThreadWithRetval(target= buyer_start_minihttp_thread)
     thread.start()
     
+    ff_retval = start_firefox()
+    if ff_retval != 'success':
+        os.kill(stcppipe_proc.pid, signal.SIGTERM)
+        ssh_proc.stdin.write('exit\n')
+        print ('Error while starting Firefox: '+ff_retval, end='\r\n')
+        exit(1)
+    
+    while True:
+        thread.join(1)
+        if not thread.isAlive():
+            break
+    #we get here when thread terminates
+    os.kill(stcppipe_proc.pid, signal.SIGTERM)
+    
+    if thread.retval == 'failure':
+        print ("Could not decrypt HTML locally", end='\r\n')
+        ssh_proc.stdin.write('exit\n')
+        exit(1)
+        
+    if thread.retval != 'success':
+        print ("Internal error. Thread returned unknown value", end='\r\n')
+        ssh_proc.stdin.write('exit\n')
+        exit(1)
+    
+    sslkey_fd = open(os.join.path(logdir,'tmpkey'), 'r')
+    key_data = sslkey_fd.read()
+    sslkey_fd.close()
+    ssh_proc.stdin.write('sslkey '+key_data+'\n')
+    
+
     
