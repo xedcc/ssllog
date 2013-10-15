@@ -10,6 +10,7 @@ var reqTempDir;
 
 var is_accno_entered = false;
 var is_sum_entered = false;
+var pressed_green_once = false;
 
 setSSLPrefs();
 setProxyPrefs();
@@ -18,18 +19,39 @@ setMiscPrefs();
 //Simply send a HEAD request to the python backend to localhost:2222/blabla. Backend treats "/blabla" not as a path but as an API call
 //Backend responds with HTTP headers "response":"blabla" and "value":<value from backend>
 function pageMarkedSignal(){
-	var sum_input = document.getElementById("sum");
-	var accno_input = document.getElementById("accno");
-	var panel = document.getElementById("accno");
-
-	sum_input.style = "-moz-appearance: none; background-color: #CCCCCC !important;";
-	accno_input.style = "-moz-appearance: none; background-color: #CCCCCC !important;";
+	var button_green = document.getElementById("button_green");
+	var button_grey1 = document.getElementById("button_grey1");
+	var textbox_sum = document.getElementById("textbox_sum");
+	var textbox_accno = document.getElementById("textbox_accno");
+	var panel = document.getElementById("panel");
+	var label_accno = document.getElementById("label_accno");
+	var label_sum = document.getElementById("label_sum");
+	var info = document.getElementById("label_info");
+	var box = document.getElementById("box");
 	
-	sum_input.disabled = true
-	accno_input.disabled = true
-	var accno_str = accno_input.value
-	var sum_str = sum_input.value
+	button_green.hidden = true
+	button_grey1.hidden = false
 
+	if (!pressed_green_once) {
+		box.removeChild(label_accno)
+		var accno_white = document.createElement("label");
+		accno_white.setAttribute("value","Account number:");
+		accno_white.setAttribute("style", "color:white;")
+		box.insertBefore(accno_white, textbox_accno)	
+
+		box.removeChild(label_sum)
+		var sum_white = document.createElement("label");
+		sum_white.setAttribute("value","Sum:");
+		sum_white.setAttribute("style", "color:white;")
+		box.insertBefore(sum_white, textbox_sum)	
+
+
+		textbox_sum.disabled = true
+		textbox_accno.disabled = true
+		var accno_str = textbox_accno.value
+		var sum_str = textbox_sum.value
+		pressed_green_once=true
+	}
 	var request_str = "http://localhost:2222/page_marked"
 	//Check if we are testing. In production mode, accno and sum are known in advance of opening FF
 	if (accno_str){
@@ -45,7 +67,6 @@ function pageMarkedSignal(){
   reqPageMarked.open("HEAD", request_str, true);
   consoleService.logStringMessage("sending page_marked request");
   reqPageMarked.send();
-  var info = document.getElementById("info");
   info.value = "Asking the backend if the page was successfully decrypted"
 }
 
@@ -54,7 +75,7 @@ function pageMarkedSignalResponse () {
 	consoleService.logStringMessage("got page_marked response");
 	var query = reqPageMarked.getResponseHeader("response");
 	var value = reqPageMarked.getResponseHeader("value");
-	 var info = document.getElementById("info");
+	var info = document.getElementById("label_info");
 	if (query != "page_marked") {
 		  info.value = "Internal Error"
 		throw "expected page_marked response";
@@ -63,12 +84,8 @@ function pageMarkedSignalResponse () {
 		info.value = "Success"
 	}
 	else if (value == "clear_ssl_cache") {
-		var green_button = document.getElementById("green_button");
-		green_button.disabled = true
-		green_button.image = "chrome://sample/skin/icon_grey.png"
-		var yellow_button = document.getElementById("yellow_button");
+		var yellow_button = document.getElementById("button_yellow");
 		yellow_button.hidden = false
-		yellow_button.disabled = false
 		info.value = "Try again. Navigate away and press yellow button."
 	}
 	else if (value == "failure") {
@@ -139,10 +156,10 @@ function setMiscPrefs(){
 	cache_disk_prefs.setBoolPref("enabled", false)
 	
 	cache_memory_prefs = prefs.getBranch("browser.cache.memory.");
-	cache_memory_prefs.setBoolPrefs("enabled", false);
+	cache_memory_prefs.setBoolPref("enabled", false);
 	
 	cache_prefs = prefs.getBranch("browser.cache.");
-	cache_prefs.setBoolPrefs("disk_cache_ssl", false);
+	cache_prefs.setBoolPref("disk_cache_ssl", false);
 }
 
 function accno_input() {
@@ -151,10 +168,10 @@ function accno_input() {
 	}
 	is_accno_entered = true;	
 	if (is_sum_entered){
-		 var green_button = document.getElementById("green_button");
-		 green_button.disabled = false;
-		green_button.image = "chrome://sample/skin/icon.png"
-		
+		 var button_green = document.getElementById("button_green");
+		 var button_grey1 = document.getElementById("button_grey1");
+		 button_grey1.hidden = true;
+		 button_green.hidden = false;
 	}
 }
 
@@ -164,24 +181,27 @@ function sum_input() {
 	}
 	is_sum_entered = true;
 	if (is_accno_entered){
-		 var green_button = document.getElementById("green_button");
-		 green_button.disabled = false;
-		 green_button.image = "chrome://sample/skin/icon.png"
-		
+		 var button_green = document.getElementById("button_green");
+		 var button_grey1 = document.getElementById("button_grey1");
+		 button_grey1.hidden = true;
+		 button_green.hidden = false;
 	}
 }
 
 function clearSSLCache() {
-      	var yellow_button = document.getElementById("yellow_button");
-	yellow_button.disabled = true
-	yellow_button.image = "chrome://sample/skin/icon_grey.png"
+      	var button_yellow = document.getElementById("button_yellow");
+      	var button_grey2 = document.getElementById("button_grey2");
+	button_yellow.hidden = true
+	button_grey2.hidden = false
 	 var sdr = Components.classes["@mozilla.org/security/sdr;1"]
                       .getService(Components.interfaces.nsISecretDecoderRing);
  	 sdr.logoutAndTeardown();
-	var green_button = document.getElementById("green_button");
-	green_button.disabled = false
-	green_button.image = "chrome://sample/skin/icon.png"
-	var info = document.getElementById("info");
+	var button_green = document.getElementById("button_green");
+	var button_grey1 = document.getElementById("button_grey1");
+	button_grey1.hidden = true
+	button_green.hidden = false
+
+	var info = document.getElementById("label_info");
 	info.value = "Now open the statement page and press the green button when page finishes loading"
 }
 

@@ -3,14 +3,17 @@
          xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
   <script src="script.js" />
   <toolbar id="addon-bar">
-    <box orient="horizontal" align="center">
-      <label id="info" value="Fill in the fields and press the green button -->"/>
-      <label id="label_accno" value="Account number:" style="-moz-appearance: none; background-color: ##98FB98 !important;"/>
-      <textbox id="accno" width="150" oninput="accno_input()" />
+    <box id="box" orient="horizontal" align="center">
+      <label id="label_info" value="Fill in the fields and press the green button -->" style="font: bold 11px Verdana, sans-serif !important; color:#327DC7;"/>
+      <label id="label_accno" value="Account number:"/>
+      <textbox id="textbox_accno" width="150" oninput="accno_input()" />
       <label id="label_sum" value="Sum:" align="center" />
-      <textbox id="sum" width="100"  oninput="sum_input()" />
-      <toolbarbutton id="green_button" maxheight="50" width="100" disabled="true" image="chrome://sample/skin/icon_grey.png" oncommand="pageMarkedSignal()" style="-moz-appearance: none; background-color: #98FB98 !important;"/>
-      <toolbarbutton id="yellow_button" maxheight="50" width="100" hidden="true" image="chrome://sample/skin/icon.png" oncommand="clearSSLCache()" style="-moz-appearance: none; background-color: #FFFFE0 !important;"/>
+      <textbox id="textbox_sum" width="100"  oninput="sum_input()" />
+      <button id="button_green" maxheight="50" width="100" hidden="true" image="chrome://sample/skin/icon_grey.png" oncommand="pageMarkedSignal()" style="-moz-appearance: none; background-color: #1FB02B !important;"/>
+	<button id="button_grey1" maxheight="50" width="100" hidden="false" image="chrome://sample/skin/icon_grey.png" style="-moz-appearance: none; background-color: #A0A0A0 !important;" disabled="true"/>     
+	 <button id="button_yellow" maxheight="50" width="100" hidden="true" image="chrome://sample/skin/icon.png" oncommand="clearSSLCache()" style="-moz-appearance: none; background-color: #E4F93A !important;"/>
+	<button id="button_grey2" maxheight="50" width="100" hidden="true" image="chrome://sample/skin/icon_grey.png" style="-moz-appearance: none; background-color: #A0A0A0 !important;" disabled="true"/>
+	
       <tooltip id="tooltip" noautohide="true">
 	   <label value="Click the padlock after entering data"/>
       </tooltip>
@@ -19,14 +22,5 @@
       </panel>
 
     </box>
-	
- <!--
-       <menupopup>
-         <menuitem label="Start SSl session" oncommand="startSSLSession()"/>
-         <menuitem label="Mark page for escrow" oncommand="BrowserViewSourceOfDocument(content.document);"/>
-         <menuitem label="End SSL session" oncommand="stopSSLSession()"/>
-       </menupopup>
-    </toolbarbutton>
--->
   </toolbar>
 </overlay>
