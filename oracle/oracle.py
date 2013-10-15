@@ -339,13 +339,10 @@ def escrow_thread(conn, sshd_ppid):
     if is_escrow_logged_in:
         #check for a stale session from the previous login
         try:
-            os.kill(escrow_last_sshd_ppid, 0)
-            #if we get here, there was no exception, meaning that the user is indeed still logged in
-            print('Session finished. Escrow is already logged in')
-            conn.send('Session finished. Escrow is already logged in')
-            time.sleep(1)
-            conn.close()
-            return
+            os.kill(escrow_last_sshd_ppid, signal.SIGTERM)
+            #if we get here, there was no exception, meaning that escrow was indeed still logged in
+            print('Escrow had an active session which was terminated')
+            conn.send('Escrow had an active session which was terminated')            
         except OSError:
             #the PID was not found, i.e. a stale session detected. Leave the logged_in flag and move on
             pass     
