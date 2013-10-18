@@ -16,9 +16,9 @@ import time
 import urllib
 from xml.dom import minidom
 
-TESTING = True
-#ALPHA_TESTING means the users have to enter accno and sum themselves via FF addon
-ALPHA_TESTING = False
+#TESTING = True
+#BETA_TESTING means the users have to enter accno and sum themselves via FF addon
+BETA_TESTING = False
 
 
 installdir = os.path.dirname(os.path.realpath(__file__))
@@ -37,7 +37,7 @@ oracle_snapID ='snap-f2596bf0'
 accno = None
 sum_ = None
 
-#a thread which returns a value. This is achieved passing self as the first argument to a called function
+#a thread which returns a value. This is achieved by passing self as the first argument to a called function
 #the calling function can then set self.retval
 class ThreadWithRetval(threading.Thread):
     def __init__(self, target):
@@ -62,9 +62,9 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
     #Firefox addon speaks with HEAD
     def do_HEAD(self):
         print ('minihttp received ' + self.path + ' request',end='\r\n')
+        # example HEAD string "/page_marked?accno=12435678&sum=1234.56"        
         if self.path.startswith('/page_marked'):
-            if ALPHA_TESTING:
-                # example HEAD string "/page_marked?accno=12435678&sum=1234.56"
+            if BETA_TESTING:
                 params = []
                 for param_str in self.path.split('?')[1].split('&'):
                     paralist = param_str.split('=')
@@ -72,8 +72,7 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
                 global accno
                 global sum_
                 accno = params[0]['accno']
-                sum_ = params[1]['sum']
-            
+                sum_ = params[1]['sum']           
             result = find_page(accno, sum_)
             if result[0] != 'success':
                 print ('sending failure. Reason: '+result[0] ,end='\r\n')
@@ -112,6 +111,28 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
             self.server.retval = 'success'
             self.server.stop = True
             return
+        
+        if self.path.startswith('/check_oracle'):
+            base64str = self.path.split('?')[1]
+            arg_str = base64.b64decode(base64str)
+            args = arg_str.split()
+            retval = check_oracle_urls(*args)
+            self.send_response(200)
+            self.send_header("response", "check_oracle")
+            self.send_header("value", retval)
+            super(buyer_HandlerClass, self).do_HEAD()
+            
+        if self.path.startswith('/start_tunnel'):
+            arg_str = self.path.split('?')[1]
+            args = arg_str.split(";")
+            if BETA_TESTING:
+                key_name = "beta.key"
+            retval = start_tunnel(key_name, args[0], args[1])
+            self.send_response(200)
+            self.send_header("response", "start_tunnel")
+            self.send_header("value", retval[0])
+            super(buyer_HandlerClass, self).do_HEAD()                   
+    
                 
 
 #look at tshark's ascii dump to better understand the parsing taking place
@@ -510,8 +531,9 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
        
     return 'success'
 
-
-def setup_tunnel(privkey_file, oracle_address, assigned_port):
+#privkey_file should correspond to RSA public key registered on oracle
+#assigned_port should be provided by the escrow
+def start_tunnel(privkey_file, oracle_address, assigned_port):
     if os.path.isdir(logdir) : shutil.rmtree(logdir)
     os.mkdir(logdir)
     
@@ -557,7 +579,7 @@ def setup_tunnel(privkey_file, oracle_address, assigned_port):
         if cmd.startswith('Session finished.'): 
             os.kill(stcppipe_proc.pid, signal.SIGTERM)            
             sshlog_fd.close()            
-            return 'session finished'
+            return ['session finished']
         if cmd.startswith('Tunnel ready'): 
             sshlog_fd.close()
             return ['success', stcppipe_proc, ssh_proc]
@@ -589,10 +611,10 @@ if __name__ == "__main__":
         #print ('Error checking oracle: '+check_result)
         #exit(1)
     
-    setup_result = setup_tunnel(privkey, oracle_address, assigned_port)
+    setup_result = start_tunnel(privkey, oracle_address, assigned_port)
     if setup_result[0] == 'reconnect':
         print ('Reconnecting to sshd', end='\r\n')
-        setup_result = setup_tunnel(privkey, oracle_address, setup_result[1])
+        setup_result = start_tunnel(privkey, oracle_address, setup_result[1])
     if setup_result[0] != 'success':
         print ('Error while setting up a tunnel: '+setup_result[0], end='\r\n')
         exit(1)
@@ -629,6 +651,7 @@ if __name__ == "__main__":
     key_data = sslkey_fd.read()
     sslkey_fd.close()
     ssh_proc.stdin.write('sslkey '+key_data+'\n')
+    exit(0)
     
 
     
