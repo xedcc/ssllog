@@ -1,6 +1,8 @@
 -------------------------------------------------------------------------------
 HOW TO CREATE AN ORACLE EBS SNAPSHOT.
 
+NB: You will have to dedicate an entire AWS account for the purpose of running an oracle.
+
 Launch a new instance Ubuntu Server 12.04.2 LTS 64 bit AMI ID ami-d0f89fb9.
 Wait for the instance to initialize and "Status Checks" showing "2/2 checks passed".
 Stop the instance, wait for the state to become "Stopped", and detach the volume.
@@ -8,7 +10,8 @@ Wait for the volume state to become "available" and attach the volume to any run
 
 From within the running instance "sudo mount" the volume and perform file system changes to the mounted volume:
 
-(The reason the folowing needs to be deleted is because files in those locations will always vary between instances of the same AMI.)
+(The reason the items below must be deleted is because files in those locations are modified during boot time and will always vary between instances of the same AMI.)
+
 delete and recreate /dev with permissions 755 root:root
 rm /etc/hostname 
 rm -r /var/log
@@ -37,11 +40,11 @@ Create a public snapshot from the volume and note the snapshot ID.
 -------------------------------------------------------------------------------
 HOW TO CREATE AN ORACLE INSTANCE FROM THE ORACLE EBS SNAPSHOT.
 
-Install ec2-api-tools on your local machine. You need to add a new repository. Please search online.
+Install ec2-api-tools on your local machine. You need to add a new apt-get repository. Please search online.
 
 ec2-run-instances ami-d0f89fb9 -t t1.micro -z us-east-1a -b /dev/sda1=none -b /dev/sda2=<snap-id>::false:standard -O <Access Key ID> -W <Secret Access Key>
 
-Please make sure that your EC2 security group allows inbound connections to TCP port 22.
+Make sure that your EC2 security group allows inbound connections to TCP port 22.
 The rule looks like: Port range: 22, Source: 0.0.0.0/0
 
 Also make sure that instance's "launchTime" and volume's "attachTime" happened on the same minute with no more than 3 seconds between the events.
@@ -67,10 +70,10 @@ Now compare the hashes of the custom volume to the hashes of the volume from the
 cd into the root directory of the mounted volume , e.g. "cd /mnt/myvolume" and "sudo -s"
 
 find . -printf '%h %f %U %G %m %l\n' | sha256sum
-3ef4568f919b1defa995df57650e226fa2acfc3924bc4494943286cf42647952
+e.g. 3ef4568f919b1defa995df57650e226fa2acfc3924bc4494943286cf42647952
 
 find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum
-8914bc0302a8c1b087bba10ff973b0c5fe05381e4644500741beb712c9bd8a21
+e.g. 8914bc0302a8c1b087bba10ff973b0c5fe05381e4644500741beb712c9bd8a21
 
 
 -------------------------------------------------------------------------------
@@ -79,15 +82,16 @@ HOW CAN A THIRD PARTY DETERMINE THAT THE RUNNING ORACLE INSTANCE HAS NOT BEEN TA
 Using the GET URLs made public by escrow, make sure that the following requirements are met:
 
 1.	In DescribeInstances URL (DIURL):
-"dnsName" matches the DNS name of the instance
+"dnsName" matches the DNS name of the oracle
 "imageID" is "ami-d0f89fb9"
 "instanceState""name" is "running"
 "rootDeviceName" is "/dev/sda1"
 in "blockDeviceMapping" there should be ONLY ONE "item" with "deviceName" "/dev/sda2", "ebs""status" is "attached"
+compare "launchTime" and "ebs""attachTime". The two event must happen on the same minute and no more than 3 seconds apart.
 
 2.	In DescribeVolumes URL (DVURL): 
 "volumeId" matches "ebs""volumeId" from DIURL
-"snapshotId" is "??????"
+"snapshotId" matches a public snaphot ID which has been verified using the above instructions "HOW CAN A THIRD PARTY CHECK THAT THE SNAPSHOT CONTENTS WAS NOT MALICIOUSLY MODIFIED."
 "status" is "in-use"
 "volumeType" is "standard"
 "attachmentSet""item""volumeId" matches "ebs""volumeId" from DIURL
@@ -98,7 +102,7 @@ in "blockDeviceMapping" there should be ONLY ONE "item" with "deviceName" "/dev/
 "attachmentSet""item""attachTime" was attached on the same minute as & no later than 3 seconds from "launchtime" from DIURL 
 
 3.	In GetConsoleOutput URL:
-the "output" node after base64 decoding should not match the regular expression 'xvd[^a] | xvda[^2]' which means that no string starting with "xvd" is allowed to be present, other than the string "xvda2"
+the base64-decoded "output" node must not match the regular expression 'xvd[^a] | xvda[^2]' which means that no string starting with "xvd" is allowed to be present, other than the string "xvda2"
 "instanceId" matches "instanceId" from DIURL
 
 4.	In GetUser URL:
@@ -112,10 +116,10 @@ For all those nodes where "Name" is "VolumeId", "Value" matches "blockDeviceMapp
 
 Explanation:
 
-"AWSAccessKeyId" should be the same to prove that the queries are made on behalf of user root.
+"AWSAccessKeyId" should be the same to prove that the queries are made on behalf of AWS user "root".
 Otherwise the attacker could create a user with limited privileges for whom the Query API would report only partial information.
 
-ListMetrics shows all the volumes which existed under the AWS account within the last 2 weeks, whether those volumes are now deleted or not.
+ListMetrics shows all the volumes which existed under the AWS account within the last 2 weeks, whether those volumes are now deleted or not. This creates an extra layer of security against yet-unknown vulnerabilities.
 
 
 -------------------------------------------------------------------------------
