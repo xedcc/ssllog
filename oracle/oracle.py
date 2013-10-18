@@ -64,12 +64,16 @@ def get_txid_index_in_db(txid, lock=True, ban=False):
     return found_index
 
  
-def get_database_as_a_string():
+def get_database_as_a_string(txid):
     iostr = StringIO.StringIO()
     __LOCK_DB()
     iostr.write(database)
     __UNLOCK_DB()
-    return iostr.getvalue()
+    retval = iostr.getvalue()
+    if txid == "escrow-id":
+        return retval
+    else:
+        return retval[ retval.rfind( "{", 0, retval.find("'txid': '"+txid+"'") ) : retval.find( "}", retval.find("'txid': '"+txid+"'") ) ]
 
 def escrow_add_pubkey(txid, pubkey, port):
     #make sure the txid is not in the db already
@@ -189,7 +193,7 @@ def thread_handle_txid(conn, txid, sshd_ppid):
  
     if finished_banking:
         #if the user has finished the banking session, it is assumed that he logs in to audit the database
-        db_str = get_database_as_a_string()
+        db_str = get_database_as_a_string(txid)
         print 'Database sent to user'
         conn.send('database ' + db_str)
         #allow stub to process socket data before sending the "finished" message
@@ -503,7 +507,7 @@ def escrow_thread(conn, sshd_ppid):
                 conn.close()
                 is_escrow_logged_in = False
                 return
-            db_str = get_database_as_a_string()
+            db_str = get_database_as_a_string("escrow-id")
             print 'Database sent to escrow' + db_str
             conn.send('database ' + db_str)
             continue

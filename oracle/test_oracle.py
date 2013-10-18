@@ -332,7 +332,7 @@ while 1:
         if not is_user_db_ready:
             continue
         if not re.match("database " +
-                       re.escape("[{")+
+                       re.escape("{")+
                        "'escrow_fetched_tarball': 0"+
                        ", 'added': " + "[0-9]{10,10}" +
                        ", 'hash': '" + "[0-9,a-f]{64,64}"+"'"+ 
@@ -343,18 +343,7 @@ while 1:
                        ", 'pubkey': '" +re.escape(pubkey_user1)+ "'"+
                        ", 'port': 2134"+
                        ", 'txid': '2341-0978'"+
-                       re.escape("}, {")+
-                       "'escrow_fetched_tarball': 0,"+
-                       " 'added': " +"[0-9]{10,10}"+
-                       ", 'hash': ''" +
-                       ", 'last_login_time': 0" +
-                       ", 'finished_banking': 0" + 
-                       ", 'is_logged_in_now': False"+
-                       ", 'sshd_ppid': 0"+
-                       ", 'pubkey': '" +re.escape(pubkey_user2) +"'"+
-                       ", 'port': 7656" +
-                       ", 'txid': '6534-1120'" +
-                       re.escape("}]\n"), user_db):
+                       re.escape("}")
             print ('Failed database compare No.2')
             exit(0)
         print 'Success in database compare No2'
