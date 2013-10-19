@@ -4,9 +4,7 @@ consoleService.logStringMessage("hello");
 var prefs = Components.classes["@mozilla.org/preferences-service;1"]
                     .getService(Components.interfaces.nsIPrefService);
 
-var tempdir = "";
-var is_tempdir_received = false;
-var reqTempDir;
+var isEscrowChecked = false;
 
 var is_accno_entered = false;
 var is_sum_entered = false;
@@ -205,63 +203,81 @@ function clearSSLCache() {
 	info.value = "Now open the statement page and press the green button when page finishes loading"
 }
 
-//obsolete function
-function getTempDir () {
-  is_tempdir_received = false;
-  reqTempDir = new XMLHttpRequest();
-  reqTempDir.onload = reqTempDirListener;
-  reqTempDir.open("HEAD", "http://localhost:2222/tempdir", true);
-  consoleService.logStringMessage(reqTempDir);
-  consoleService.logStringMessage("sending TEMPDIR request");
-  reqTempDir.send();
+function check_default_escrow(){
+	var prefs = Components.classes["@mozilla.org/preferences-service;1"]
+                    .getService(Components.interfaces.nsIPrefService);
+    prefs = prefs.getBranch("extensions.lspnr.");
+    var escrow_name = prefs.getCharPref("default_escrow")
+    var dnsname = prefs.getCharPref("escrow_"+escrow_name+".dnsname")
+    var getuserurl = prefs.getCharPref("escrow_"+escrow_name+".getuserurl")
+    var listmetricsurl = prefs.getCharPref("escrow_"+escrow_name+".listmetricsurl")
+    var describeinstancesurl = prefs.getCharPref("escrow_"+escrow_name+".describeinstancesurl")
+    var describevolumesurl = prefs.getCharPref("escrow_"+escrow_name+".describevolumesurl")
+    var getconsoleoutputurl = prefs.getCharPref("escrow_"+escrow_name+".getconsoleoutputurl")
+    base64string = btoa(getuserurl+" "+listmetricsurl+" "+describeinstancesurl+" "+describevolumesurl+" " + getconsoleoutputurl +" "+ dnsname)
+
+	var reqCheckEscrow = new XMLHttpRequest();
+	reqCheckEscrow.onload = responseCheckEscrow;
+	reqCheckEscrow.open("HEAD", "http://localhost:2222/check_oracle?"+base64string, true);
+	consoleService.logStringMessage("sending check_oracle request");
+	reqCheckEscrow.send();
+	//give 10 secs for escrow to respond
+	setTimeout(checkEscrowResponse, 1000, 0)
+
 }
 
-//obsolete function
-function reqTempDirListener () {
-  consoleService.logStringMessage("got TEMPDIR response");
-  var query = reqTempDir.getResponseHeader("response");
-  var value = reqTempDir.getResponseHeader("value");
-  if (query != "tempdir") throw "expected TEMPDIR response";
-  if (value.length == 0) throw "TEMPDIR value is zero";
-  tempdir = value;
-  is_tempdir_received = true;
-//TODO close this listener
+function responseCheckEscrow(iteration){
+	if (typeof iteration == "number"){
+		if (iteration > 10){
+			alert("Oracle is taking more than 10 seconds to respond. Please try again")
+			return
+		}
+		setTimeout(responseCheckEscrow, 1000, iteration++)
+	}
+	//else: not a timeout but a response from the server
 }
 
-//obsolete function
-//Give backend 5 seconds to respond before giving up
-//JS doesn't have a sleep() function.
-function waitForResponse(iteration) {
-	consoleService.logStringMessage("waitForResponse hit");
-	if (is_tempdir_received == true) continue_after_tempdir_received();
+function startTunnel (dns_name, port){
+	var reqStartTunnel = new XMLHttpRequest();
+	reqStartTunnel.onload = responseStartTunnel;
+	reqStartTunnel.open("HEAD", "http://localhost:2222/start_tunnel?"+dns_name+";"+port, true);
+	consoleService.logStringMessage("sending start_tunnel request");
+	reqStartTunnel.send();
+	//give 10 secs for escrow to respond
+	setTimeout(responseStartTunnel, 1000, 0)
+
+}
+
+function responseStartTunnel(){
+	if (typeof iteration == "number"){
+		if (iteration > 10){
+			alert("Oracle is taking more than 10 seconds to respond. Please try again")
+			return
+		}
+		setTimeout(responseCheckEscrow, 1000, iteration++)
+	}
+	//else: not a timeout but a response from the server
+
+}
+
+//OBSOLETE but may be useful in the future
+
+//JS doesn't have a sleep() function due to its single-threadedness
+//we check every second if callback which listens for a response from the backend has received such a response and consequently
+//set the flag to true. If it didn't happen within timeout seconds, we let the callback know
+function waitForResponse(callback, flag, timeout, iteration) {
+	if (flag == true) return;
 	else {		  
-		if (iteration == 5) throw "no TEMPDIR response";
+		if (iteration == timeout) {
+			callback("timeout")
+			return
+		}
 		iteration++;
   		consoleService.logStringMessage("iteration No");
   		consoleService.logStringMessage(iteration);
 		//non-standard setTimeout invocation, FF-specific
-		setTimeout(waitForResponse,1000,iteration);
+		setTimeout(waitForResponse, 1000, callback, flag, timeout, iteration);
 	}
 }
 
-//obsolete function
-function continue_after_tempdir_received() {
-	viewsource_prefs = prefs.getBranch("view_source.editor.");
-//FF will first write the source file into a "TMP" env.var. and then try to invoke "path" on it
-//We only need it to write the source file into a TMP dir and silently fail to invoke a "path" program 
-	viewsource_prefs.setBoolPref("external", true); 
-//any existing dummyfile will make FF silently fail to open the source viewer 
-	viewsource_prefs.setCharPref("path",tempdir);
-}
 
-
-
-//obsolete function
-function sendStatus () {
-  var oReqPost = new XMLHttpRequest();
-  oReqPost.onload = reqListener2;
-  oReqPost.open("HEAD", "http://localhost:2222/status", true);
-  consoleService.logStringMessage(oReqPost);
-  consoleService.logStringMessage("sending STATUS request");
-  oReqPost.send();
-}
