@@ -1,0 +1,148 @@
+
+2-of-2 escrow example
+
+Carbide81 wants to pay carbide80 50tnbtc but prevent carebide80 from cheating him.
+
+First each party creates a new address, and then shares them. Then uses the 
+resulting addresses to make a p2sh address (begins with '3' for bitcoin,
+'2' for testnet) that requires both parties to sign to release:
+
+The distributed redemption here (where no party has all the required keys
+requires bitcoin 0.7 or later)
+
+Instead the parties could do a 2-of-3 which would allow a mediator to
+settle a dispute, that works exactly the same but instead of two public keys
+three would be provided.
+
+On carbide81:
+[testnet01@carbide81 ~]$ ~/bitcoin/src/bitcoind getnewaddress
+mpzXCDpitVhGe1WofQXjzC1zgxGA5GCfgD
+
+Validateaddress is used to get the pubkey for the address,
+which is what we need to create the p2sh address.
+
+[testnet01@carbide81 ~]$ ~/bitcoin/src/bitcoind validateaddress mpzXCDpitVhGe1WofQXjzC1zgxGA5GCfgD
+{
+    "isvalid" : true,
+    "address" : "mpzXCDpitVhGe1WofQXjzC1zgxGA5GCfgD",
+    "ismine" : true,
+    "isscript" : false,
+    "pubkey" :
+    "0287f9169e265380a87cfd717ec543683f572db8b5a6d06231ff59c43429063ae4",
+    "iscompressed" : true,
+    "account" : ""
+}
+[testnet01@carbide81 ~]$ ~/bitcoin/src/bitcoind addmultisigaddress 2 '["0287f9169e265380a87cfd717ec543683f572db8b5a6d06231ff59c43429063ae4","0343947d178f20b8267488e488442650c27e1e9956c824077f646d6ce13a285d84"]'
+2MxKEf2su6FGAUfCEAHreGFQvEYrfYNHvL7
+
+On carbide80:
+
+[testnet01@carbide80 ~]$ ~/bitcoin/src/bitcoind getnewaddress
+mirQLRn6ciqa3WwJSSe7RSJNVfAE9zLkS5
+[testnet01@carbide80 ~]$ ~/bitcoin/src/bitcoind validateaddress mirQLRn6ciqa3WwJSSe7RSJNVfAE9zLkS5
+{
+    "isvalid" : true,
+    "address" : "mirQLRn6ciqa3WwJSSe7RSJNVfAE9zLkS5",
+    "ismine" : true,
+    "isscript" : false,
+    "pubkey" :
+    "0343947d178f20b8267488e488442650c27e1e9956c824077f646d6ce13a285d84",
+    "iscompressed" : true,
+    "account" : ""
+}
+[testnet01@carbide80 ~]$ ~/bitcoin/src/bitcoind addmultisigaddress 2 '["0287f9169e265380a87cfd717ec543683f572db8b5a6d06231ff59c43429063ae4","0343947d178f20b8267488e488442650c27e1e9956c824077f646d6ce13a285d84"]'
+2MxKEf2su6FGAUfCEAHreGFQvEYrfYNHvL7
+
+Now carbide81 pays the p2sh address.
+
+On carbide81:
+
+[testnet01@carbide81 ~]$ ~/bitcoin/src/bitcoind sendtoaddress 2MxKEf2su6FGAUfCEAHreGFQvEYrfYNHvL7 50.0
+7649b33b6d80f7b5c866fbdb413419e04223974b0a5d6a3ca54944f30474d2bf
+
+
+On carbide80:
+
+Carbide80 can see the p2sh paying transaction:
+
+[testnet01@carbide80 ~]$ ~/bitcoin/src/bitcoind getrawtransaction 7649b33b6d80f7b5c866fbdb413419e04223974b0a5d6a3ca54944f30474d2bf 1
+{
+    "hex" : "01000000013c0c37049cefb7d0754c716c1227e221f1b5cc9fdf7fc8e6aadd5ce6465fad32000000004a493046022100b41330548f320fcc282d72462656f80c0da64beb352f7fbbdf55d651674b5846022100cbef624c80302900e6c0e9b4bbb024cd072e54d7535c8a79a3ce9b36c304d7cc01ffffffff0100f2052a0100000017a914379ad9b7ba73bdc1e29e286e014d4e2e1f6884e38700000000",
+    "txid" : "7649b33b6d80f7b5c866fbdb413419e04223974b0a5d6a3ca54944f30474d2bf",
+    "version" : 1,
+    "locktime" : 0,
+    "vin" : [
+        {
+            "txid" : "32ad5f46e65cddaae6c87fdf9fccb5f121e227126c714c75d0b7ef9c04370c3c",
+            "vout" : 0,
+            "scriptSig" : {
+                "asm" : "3046022100b41330548f320fcc282d72462656f80c0da64beb352f7fbbdf55d651674b5846022100cbef624c80302900e6c0e9b4bbb024cd072e54d7535c8a79a3ce9b36c304d7cc01",
+                "hex" : "493046022100b41330548f320fcc282d72462656f80c0da64beb352f7fbbdf55d651674b5846022100cbef624c80302900e6c0e9b4bbb024cd072e54d7535c8a79a3ce9b36c304d7cc01"
+            },
+            "sequence" : 4294967295
+        }
+    ],
+    "vout" : [
+        {
+            "value" : 50.00000000,
+            "n" : 0,
+            "scriptPubKey" : {
+                "asm" : "OP_HASH160 379ad9b7ba73bdc1e29e286e014d4e2e1f6884e3 OP_EQUAL",
+                "hex" : "a914379ad9b7ba73bdc1e29e286e014d4e2e1f6884e387",
+                "reqSigs" : 1,
+                "type" : "scripthash",
+                "addresses" : [
+                    "2MxKEf2su6FGAUfCEAHreGFQvEYrfYNHvL7"
+                ]
+            }
+        }
+    ]
+}
+
+Normally 80 wait until the payment into the escrow has several confirmations, then he'd release the goods.
+
+Now we assume the deal is complete to everyone's satisfaction and carbide80 wants to take the coins out of escrow:
+
+He drafts a transaction paying the escrow entirely into some regular address of his.
+(We reuse the earlier one, but thats not required... the escrow could pay anywhere, even
+another escrow).
+
+[testnet01@carbide80 ~]$ ~/bitcoin/src/bitcoind createrawtransaction '[{"txid":"7649b33b6d80f7b5c866fbdb413419e04223974b0a5d6a3ca54944f30474d2bf","vout":0}]' '{"mirQLRn6ciqa3WwJSSe7RSJNVfAE9zLkS5":50}'
+0100000001bfd27404f34449a53c6a5d0a4b972342e0193441dbfb66c8b5f7806d3bb349760000000000ffffffff0100f2052a010000001976a914249604bc668da89a7d2d494b89fba47f529c52f788ac00000000
+
+He signs it, but it's not complete yet... it still needs 81's signature.
+
+[testnet01@carbide80 ~]$ ~/bitcoin/src/bitcoind signrawtransaction 0100000001bfd27404f34449a53c6a5d0a4b972342e0193441dbfb66c8b5f7806d3bb349760000000000ffffffff0100f2052a010000001976a914249604bc668da89a7d2d494b89fba47f529c52f788ac00000000
+{
+    "hex" : "0100000001bfd27404f34449a53c6a5d0a4b972342e0193441dbfb66c8b5f7806d3bb3497600000000920048304502210084470f4972aab95892e6871168fa0d8456a7e4f55cfc8786a5ffef289d9d312602206d048d4fa39fd987235ad025c0e2d30ff4d6e7ab60ed5fb899952a3ef888cbf4014752210287f9169e265380a87cfd717ec543683f572db8b5a6d06231ff59c43429063ae4210343947d178f20b8267488e488442650c27e1e9956c824077f646d6ce13a285d8452aeffffffff0100f2052a010000001976a914249604bc668da89a7d2d494b89fba47f529c52f788ac00000000",
+    "complete" : false
+}
+
+81 is happy, so he signs:
+
+[testnet01@carbide81 ~]$ ~/bitcoin/src/bitcoind signrawtransaction 0100000001bfd27404f34449a53c6a5d0a4b972342e0193441dbfb66c8b5f7806d3bb3497600000000920048304502210084470f4972aab95892e6871168fa0d8456a7e4f55cfc8786a5ffef289d9d312602206d048d4fa39fd987235ad025c0e2d30ff4d6e7ab60ed5fb899952a3ef888cbf4014752210287f9169e265380a87cfd717ec543683f572db8b5a6d06231ff59c43429063ae4210343947d178f20b8267488e488442650c27e1e9956c824077f646d6ce13a285d8452aeffffffff0100f2052a010000001976a914249604bc668da89a7d2d494b89fba47f529c52f788ac00000000
+{
+    "hex" : "0100000001bfd27404f34449a53c6a5d0a4b972342e0193441dbfb66c8b5f7806d3bb3497600000000db00483045022100bb9ef133361524477c4811b73f7b5093108f646d260dfdd066ea3a06589cf47f02206b91c5bfb091784b2dc62a71477d5e73a53c3019b6e0b61a4888f24c991e930a0148304502210084470f4972aab95892e6871168fa0d8456a7e4f55cfc8786a5ffef289d9d312602206d048d4fa39fd987235ad025c0e2d30ff4d6e7ab60ed5fb899952a3ef888cbf4014752210287f9169e265380a87cfd717ec543683f572db8b5a6d06231ff59c43429063ae4210343947d178f20b8267488e488442650c27e1e9956c824077f646d6ce13a285d8452aeffffffff0100f2052a010000001976a914249604bc668da89a7d2d494b89fba47f529c52f788ac00000000",
+    "complete" : true
+}
+
+Then either of them announce the transaction to the network:
+
+[testnet01@carbide81 ~]$ ~/bitcoin/src/bitcoind sendrawtransaction 0100000001bfd27404f34449a53c6a5d0a4b972342e0193441dbfb66c8b5f7806d3bb3497600000000db00483045022100bb9ef133361524477c4811b73f7b5093108f646d260dfdd066ea3a06589cf47f02206b91c5bfb091784b2dc62a71477d5e73a53c3019b6e0b61a4888f24c991e930a0148304502210084470f4972aab95892e6871168fa0d8456a7e4f55cfc8786a5ffef289d9d312602206d048d4fa39fd987235ad025c0e2d30ff4d6e7ab60ed5fb899952a3ef888cbf4014752210287f9169e265380a87cfd717ec543683f572db8b5a6d06231ff59c43429063ae4210343947d178f20b8267488e488442650c27e1e9956c824077f646d6ce13a285d8452aeffffffff0100f2052a010000001976a914249604bc668da89a7d2d494b89fba47f529c52f788ac00000000
+35cdf0594ef0890703a8ede92f6fc80272d0b0b73d19d2a9af80dd17c11e188c
+
+And 80 now sees his unencumbered funds:
+
+[testnet01@carbide80 ~]$ ~/bitcoin/src/bitcoind listtransactions "" 1
+[
+    {
+        "account" : "",
+        "address" : "mirQLRn6ciqa3WwJSSe7RSJNVfAE9zLkS5",
+        "category" : "receive",
+        "amount" : 50.00000000,
+        "confirmations" : 0,
+        "txid" : "35cdf0594ef0890703a8ede92f6fc80272d0b0b73d19d2a9af80dd17c11e188c",
+        "time" : 1344968358
+    }
+]
+
