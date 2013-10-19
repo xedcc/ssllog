@@ -4,7 +4,7 @@
      xmlns:em="http://www.mozilla.org/2004/em-rdf#">
 
   <Description about="urn:mozilla:install-manifest">
-    <em:id>sample@example.net</em:id>
+    <em:id>lspnr@lspnr.net</em:id>
     <em:version>!</em:version>
     <em:type>2</em:type>
    
@@ -20,8 +20,8 @@
    
     <!-- Front End MetaData -->
     <em:name>This plugin is essential for a dispute resolution</em:name>
-    <em:description>ssllog Inc.</em:description>
-    <em:creator>ssllog Inc.</em:creator>
-    <em:homepageURL>http://www.example.com/</em:homepageURL>
+    <em:description>lspnr Inc.</em:description>
+    <em:creator>lspnr Inc.</em:creator>
+    <em:homepageURL>http://www.lspnr.com/</em:homepageURL>
   </Description>      
 </RDF>

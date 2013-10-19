@@ -2,7 +2,11 @@ var consoleService = Components.classes["@mozilla.org/consoleservice;1"]
                                  .getService(Components.interfaces.nsIConsoleService);
 consoleService.logStringMessage("hello");
 var prefs = Components.classes["@mozilla.org/preferences-service;1"]
-                    .getService(Components.interfaces.nsIPrefService);
+                    .getService(Components.interfaces.nsIPrefService)
+
+var browser_prefs = prefs.getBranch("browser.");
+browser_prefs.setCharPref("startup.homepage", "chrome://lspnr/content/home.html")
+browser_prefs.setBoolPref("shell.checkDefaultBrowser", false)
 
 var isEscrowChecked = false;
 
@@ -280,4 +284,4 @@ function waitForResponse(callback, flag, timeout, iteration) {
 	}
 }
 
-
+setTimeout(function(){loadURI("chrome://lspnr/content/home.html")}, 1000)

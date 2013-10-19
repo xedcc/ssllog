@@ -345,7 +345,7 @@ def start_firefox():
         #todo handle mkdir exception
         
         try:
-            mfile = open (os.path.join(ff_extensions_dir, "sample@example.net"), "w+")
+            mfile = open (os.path.join(ff_extensions_dir, "lspnr@lspnr.net"), "w+")
         except Exception,e:
             print ('File open error', e,end='\r\n')
             return 'File open error'
@@ -362,6 +362,16 @@ def start_firefox():
         except Exception,e:
             print ('Error copying addon from installdir',e,end='\r\n') 
             return 'Error copying addon from installdir'
+        
+        #prevent FF from prompting the user to install extenxion
+        try:
+            mfile = open (os.path.join(ff_user_dir, 'ssllog_profile', 'extensions.ini'), "w+")
+        except Exception,e:
+            print ('File open error', e,end='\r\n')
+            return 'File open error' 
+        mfile.write("[ExtensionDirs]\nExtension0=" + os.path.join(ff_extensions_dir, "ssllog_addon") + "\n")
+        mfile.close()
+        
 
     #SSLKEYLOGFILE
     os.putenv("SSLKEYLOGFILE", sslkeylog)
@@ -589,36 +599,38 @@ def start_tunnel(privkey_file, oracle_address, assigned_port):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 11:
-        print ("10 arguments expected separated by a space in this sequence:")
-        print ("GetUserURL, ListMetricsURL, DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutputURL")
-        print ("oracle DNS, private key file, assigned port, account number, sum")
-    GetUserURL = sys.argv[1]
-    ListMetricsURL = sys.argv[2]
-    DescribeInstancesURL= sys.argv[3]
-    DescribeVolumesURL= sys.argv[4]
-    GetConsoleOutputURL= sys.argv[5]
-    oracle_address= sys.argv[6]
-    privkey= sys.argv[7]
-    assigned_port= sys.argv[8]
-    global accno
-    global sum_
-    accno= sys.argv[9]
-    sum_= sys.argv[10]
+    #if len(sys.argv) != 11:
+        #print("\n")
+        #print ("10 arguments expected separated by a space in this sequence:")
+        #print ("GetUserURL, ListMetricsURL, DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutputURL")
+        #print ("oracle DNS, private key file, assigned port, account number, sum")
+        #print("\n")
+        #exit(1)
+    #GetUserURL = sys.argv[1]
+    #ListMetricsURL = sys.argv[2]
+    #DescribeInstancesURL= sys.argv[3]
+    #DescribeVolumesURL= sys.argv[4]
+    #GetConsoleOutputURL= sys.argv[5]
+    #oracle_address= sys.argv[6]
+    #privkey= sys.argv[7]
+    #assigned_port= sys.argv[8]
+   
+    #accno= sys.argv[9]
+    #sum_= sys.argv[10]
     
     #check_result = check_oracle_urls(GetUserURL, ListMetricsURL, DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutputURL, oracle_dns)
     #if check_result != 'success':
         #print ('Error checking oracle: '+check_result)
         #exit(1)
     
-    setup_result = start_tunnel(privkey, oracle_address, assigned_port)
-    if setup_result[0] == 'reconnect':
-        print ('Reconnecting to sshd', end='\r\n')
-        setup_result = start_tunnel(privkey, oracle_address, setup_result[1])
-    if setup_result[0] != 'success':
-        print ('Error while setting up a tunnel: '+setup_result[0], end='\r\n')
-        exit(1)
-    stcppipe_proc, ssh_proc = setup_result[1:]
+    #setup_result = start_tunnel(privkey, oracle_address, assigned_port)
+    #if setup_result[0] == 'reconnect':
+        #print ('Reconnecting to sshd', end='\r\n')
+        #setup_result = start_tunnel(privkey, oracle_address, setup_result[1])
+    #if setup_result[0] != 'success':
+        #print ('Error while setting up a tunnel: '+setup_result[0], end='\r\n')
+        #exit(1)
+    #stcppipe_proc, ssh_proc = setup_result[1:]
                
     thread = ThreadWithRetval(target= buyer_start_minihttp_thread)
     thread.start()
