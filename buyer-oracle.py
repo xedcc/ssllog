@@ -321,7 +321,7 @@ def start_firefox():
         print ("Copying plugin files into Firefox's plugin directory",end='\r\n')
        
         try:
-            inifile = open(os.path.join(ff_user_dir, "profiles.ini"), "r+a")
+            inifile = open(os.path.join(ff_user_dir, "profiles.ini"), "r+")
         except Exception,e: 
             print ('Could not open profiles.ini. Make sure it exists and you have sufficient read/write permissions',e,end='\r\n')
             return 'Could not open profiles.ini'
@@ -331,6 +331,7 @@ def start_firefox():
         our_profile_number = int(text[text.rfind("[Profile")+len("[Profile"):].split("]")[0]) +1
     
         try:
+            inifile.seek(0, os.SEEK_END)
             inifile.write('[Profile' +str(our_profile_number) + ']\nName=ssllog\nIsRelative=1\nPath=ssllog_profile\n\n')
         except Exception,e:
             print ('Could not write to profiles.ini. Make sure you have sufficient write permissions',e,end='\r\n')
