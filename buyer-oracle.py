@@ -633,7 +633,9 @@ if __name__ == "__main__":
     #stcppipe_proc, ssh_proc = setup_result[1:]
                
     thread = ThreadWithRetval(target= buyer_start_minihttp_thread)
+    thread.daemon = True
     thread.start()
+
     
     ff_retval = start_firefox()
     if ff_retval != 'success':
@@ -646,15 +648,16 @@ if __name__ == "__main__":
         thread.join(1)
         if not thread.isAlive():
             break
+
     #we get here when thread terminates
     os.kill(stcppipe_proc.pid, signal.SIGTERM)
     
     if thread.retval == 'failure':
         print ("Could not decrypt HTML locally", end='\r\n')
         ssh_proc.stdin.write('exit\n')
-        exit(1)
+        exit(1)  
         
-    if thread.retval != 'success':
+    elif thread.retval != 'success':
         print ("Internal error. Thread returned unknown value", end='\r\n')
         ssh_proc.stdin.write('exit\n')
         exit(1)
