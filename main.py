@@ -1923,7 +1923,7 @@ if __name__ == "__main__":
             start_firefox()
             #wait for minihttp server shutdown. The shutdown means that user has finished the SSL session
             while thread.isAlive():
-               time.sleep(2)
+                time.sleep(2)
             print ("User has finished the SSL session",end='\r\n')
             #todo: inform the seller at this stage that we are finished with the SSL session
             print ("Terminating dumpcap",end='\r\n')
