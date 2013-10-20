@@ -1,0 +1,147 @@
+-------------------------------------------------------------------------------
+HOW TO CREATE AN ORACLE EBS SNAPSHOT.
+
+NB: You will have to dedicate an entire AWS account for the purpose of running an oracle.
+
+Launch a new instance Ubuntu Server 12.04.2 LTS 64 bit AMI ID ami-d0f89fb9.
+Wait for the instance to initialize and "Status Checks" showing "2/2 checks passed".
+Stop the instance, wait for the state to become "Stopped", and detach the volume.
+Wait for the volume state to become "available" and attach the volume to any running instance.
+
+From within the running instance "sudo mount" the volume and perform file system changes to the mounted volume:
+
+(The reason the items below must be deleted is because files in those locations are modified during boot time and will always vary between instances of the same AMI.)
+
+delete and recreate /dev with permissions 755 root:root
+rm /etc/hostname 
+rm -r /var/log
+rm -r /var/lib/cloud
+rm -r /var/lib/dhcp
+rm -r /var/lib/plymouth
+rm -r /var/lib/urandom
+rm /etc/ssh/ssh_host_*
+rm /home/ubuntu/.ssh/authorized_keys
+rm /home/root/.ssh/authorized_keys
+
+Copy the following files from git's oracle directory making sure the permissions and ownership match:
+ 
+rc.local        to /etc/rc.local 	 perm 755	root:root
+ssh.conf        to /etc/init/ssh.conf  	 perm 644 	root:root
+sshd_config     to /etc/ssh/sshd_config	 perm 644	root:root
+authorized_keys to /home/ubuntu/.ssh/authorized_keys perm 600 	ubuntu:ubuntu
+oracle.py       to /home/ubuntu		 perm 600	ubuntu:ubuntu
+stub.py         to /home/ubuntu		 perm 600	ubuntu:ubuntu	
+stcppipe.zip    to /home/ubuntu		 perm 600	ubuntu:ubuntu
+
+"umount" the volume and detach it in the AWS console.
+Create a public snapshot from the volume and note the snapshot ID.
+
+
+-------------------------------------------------------------------------------
+HOW TO CREATE AN ORACLE INSTANCE FROM THE ORACLE EBS SNAPSHOT.
+
+Install ec2-api-tools on your local machine. You need to add a new apt-get repository. Please search online.
+
+ec2-run-instances ami-d0f89fb9 -t t1.micro -z us-east-1a -b /dev/sda1=none -b /dev/sda2=<snap-id>::false:standard -O <Access Key ID> -W <Secret Access Key>
+
+Make sure that your EC2 security group allows inbound connections to TCP port 22.
+The rule looks like: Port range: 22, Source: 0.0.0.0/0
+
+Also make sure that instance's "launchTime" and volume's "attachTime" happened on the same minute with no more than 3 seconds between the events.
+Also make sure that Console Output (Get System Log) is available, since it was observed that sometimes EC2 doesn't produce any.
+
+
+-------------------------------------------------------------------------------
+HOW CAN AN HONEST ESCROW PROVE TO THE WORLD THAT A CERTAIN IP ADDRESS IS RUNNING THE ORACLE INSTANCE
+
+Using aws_query.py create and make public GET strings for requests DescribeInstances, DescribeVolumes, GetUser, ListMetrics, and GetConsoleOutput.
+On a weekly basis, notarize and publicize the output of ListMetrics using virtual-notary.org 
+
+
+-------------------------------------------------------------------------------
+HOW CAN A THIRD PARTY CHECK THAT THE SNAPSHOT CONTENTS WAS NOT MALICIOUSLY MODIFIED.
+Repeat all the steps described in "HOW TO CREATE AN ORACLE EBS SNAPSHOT". You will get a custom volume.
+
+Create a volume from the oracle snapshot which the escrow made public.
+Attach the volume to a running instance and mount it.
+ 
+Now compare the hashes of the custom volume to the hashes of the volume from the oracle snapshot. You will first hash file/directory/symlink paths, ownership, permissions, and symlink targets then hash the contents of all regular files.
+
+cd into the root directory of the mounted volume , e.g. "cd /mnt/myvolume" and "sudo -s"
+
+find . -printf '%h %f %U %G %m %l\n' | sha256sum
+e.g. 3ef4568f919b1defa995df57650e226fa2acfc3924bc4494943286cf42647952
+
+find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum
+e.g. 8914bc0302a8c1b087bba10ff973b0c5fe05381e4644500741beb712c9bd8a21
+
+
+-------------------------------------------------------------------------------
+HOW CAN A THIRD PARTY DETERMINE THAT THE RUNNING ORACLE INSTANCE HAS NOT BEEN TAMPERED WITH.
+
+Using the GET URLs made public by escrow, make sure that the following requirements are met:
+
+1.	In DescribeInstances URL (DIURL):
+"dnsName" matches the DNS name of the oracle
+"imageID" is "ami-d0f89fb9"
+"instanceState""name" is "running"
+"rootDeviceName" is "/dev/sda1"
+in "blockDeviceMapping" there should be ONLY ONE "item" with "deviceName" "/dev/sda2", "ebs""status" is "attached"
+compare "launchTime" and "ebs""attachTime". The two event must happen on the same minute and no more than 3 seconds apart.
+
+2.	In DescribeVolumes URL (DVURL): 
+"volumeId" matches "ebs""volumeId" from DIURL
+"snapshotId" matches a public snaphot ID which has been verified using the above instructions "HOW CAN A THIRD PARTY CHECK THAT THE SNAPSHOT CONTENTS WAS NOT MALICIOUSLY MODIFIED."
+"status" is "in-use"
+"volumeType" is "standard"
+"attachmentSet""item""volumeId" matches "ebs""volumeId" from DIURL
+"attachmentSet""item""instanceId" matches "instanceId" from DIURL
+"attachmentSet""item""device" is "/dev/sd2"
+"attachmentSet""item""status" is "attached"
+"attachmentSet""item""attachTime" matches "createTime" and matches "ebs""attachTime" from DIURL
+"attachmentSet""item""attachTime" was attached on the same minute as & no later than 3 seconds from "launchtime" from DIURL 
+
+3.	In GetConsoleOutput URL:
+the base64-decoded "output" node must not match the regular expression 'xvd[^a] | xvda[^2]' which means that no string starting with "xvd" is allowed to be present, other than the string "xvda2"
+"instanceId" matches "instanceId" from DIURL
+
+4.	In GetUser URL:
+"UserId" matches "ownerId" from DIURL
+"Arn" ends with "<ownerId>:root"
+
+5.	In ListMetrics URL:
+For all those nodes where "Name" is "VolumeId", "Value" matches "blockDeviceMapping""item""ebs""volumeId" from DIURL
+
+6. All the URL strings have the same "AWSAccessKeyId"
+
+Explanation:
+
+"AWSAccessKeyId" should be the same to prove that the queries are made on behalf of AWS user "root".
+Otherwise the attacker could create a user with limited privileges for whom the Query API would report only partial information.
+
+ListMetrics shows all the volumes which existed under the AWS account within the last 2 weeks, whether those volumes are now deleted or not. This creates an extra layer of security against yet-unknown vulnerabilities.
+
+
+-------------------------------------------------------------------------------
+POSSIBLE ATTACKS AND HOW THEY WILL BE MITIGATED
+(or in other words, what will prevent a dishonest escrow (a.k.a an attacker) from modifying the oracle code)
+
+Attack 1.
+The attacker will launch the instance with his rogue volume on /dev/sda2 and oracle volume on /dev/sda3.
+The attacker will modify the oracle volume, and will modify /etc/fstab in such a way that after a reboot the oracle volume will be mounted on /dev/sda2 as the root volume. After the reboot, the attacker will detach his rogue volume.
+NB: Sadly, EC2 query API do not reflect in any way the fact that the instance was rebooted.
+
+Mitigation:
+A. The existence of two mounted volumes at boot time will be reflected in the console output (which EC2 internally stores for each instance and does not allow to be modified). The requirement for oracle is that only the string "xvda2" is allowed to be present in the console output and not any other string starting with "xvd". ("xvda2" is an EC2 alias for "sda2").
+B. Even though the oracle volume will be mounted as /dev/sda2 it will still be reported as attached to /dev/sda3 by EC2 query API (EC2 only keeps track of what was attached via the EC2 console and does not care about any Ubuntu internal mounts)
+C. ListMetrics will show extra volumes.
+
+
+Attack 2.
+The attacker will mount his rogue volume on /dev/sda2 and oracle volume on /dev/sda3. A program on the rogue volume will patch the running kernel in such a way that the now-rogue kernel will overwrite the Console log with fake info, modify and remount oracle volume as root device on /dev/sda2. After that the attacker can unmount/detach his rogue volume.
+
+Mitigation:
+see Mitigation B & C in Attack 1.
+
+
+
