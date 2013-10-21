@@ -8,8 +8,6 @@ var browser_prefs = prefs.getBranch("browser.");
 browser_prefs.setCharPref("startup.homepage", "chrome://lspnr/content/home.html")
 browser_prefs.setBoolPref("shell.checkDefaultBrowser", false)
 
-var isEscrowChecked = false;
-
 var is_accno_entered = false;
 var is_sum_entered = false;
 var pressed_green_once = false;
@@ -21,6 +19,9 @@ setMiscPrefs();
 //Simply send a HEAD request to the python backend to localhost:2222/blabla. Backend treats "/blabla" not as a path but as an API call
 //Backend responds with HTTP headers "response":"blabla" and "value":<value from backend>
 function pageMarkedSignal(){
+	var branch = Components.classes["@mozilla.org/preferences-service;1"]
+                    .getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
+
 	var button_green = document.getElementById("button_green");
 	var button_grey1 = document.getElementById("button_grey1");
 	var textbox_sum = document.getElementById("textbox_sum");
@@ -69,37 +70,61 @@ function pageMarkedSignal(){
   reqPageMarked.open("HEAD", request_str, true);
   consoleService.logStringMessage("sending page_marked request");
   reqPageMarked.send();
-  info.value = "Asking the backend if the page was successfully decrypted"
+
+  info.value = "Asking backend if page was successfully decrypted"
+  branch.setCharPref("msg_ipc", "Asking backend if HTML was successfully decrypted")
+
+  setTimeout(pageMarkedSignalResponse, 1000, 0, reqPageMarked)    
+
 }
 
 //backend responds to page_marked with either "success" ot "clear_ssl_cache"
-function pageMarkedSignalResponse () {
-	consoleService.logStringMessage("got page_marked response");
+function pageMarkedSignalResponse (iteration, request_handle) {
+	var branch = Components.classes["@mozilla.org/preferences-service;1"]
+                    .getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
+
+    if (typeof iteration == "number"){
+        if (iteration > 20){
+            branch.setCharPref("msg_ipc", "Oracle is taking more than 20 seconds to respond. Please check your internet connection and try again")
+            return
+        }
+        setTimeout(pageMarkedSignalResponse, 1000, iteration++, request_handle)
+    }
+    //else: not a timeout but a response from the server
 	var query = reqPageMarked.getResponseHeader("response");
 	var value = reqPageMarked.getResponseHeader("value");
 	var info = document.getElementById("label_info");
 	if (query != "page_marked") {
-		  info.value = "Internal Error"
-		throw "expected page_marked response";
+		info.value = "Internal Error"
+		branch.setCharPref("msg_ipc", "Internal error. Wrong response header: "+ query)
+		return
 	}
 	if (value == "success") {
-		info.value = "Success"
+		branch.setCharPref("msg_ipc", "HTML was decrypted successfully")
+		info.value = "HTML decrypted successfully. Checking escrow's trace now"
+		check_escrowtrace()
 	}
 	else if (value == "clear_ssl_cache") {
 		var yellow_button = document.getElementById("button_yellow");
 		yellow_button.hidden = false
+		branch.setCharPref("msg_ipc", "Try again. Navigate away and press yellow button and AFTER that click open your statement")
 		info.value = "Try again. Navigate away and press yellow button."
 	}
 	else if (value == "failure") {
 		info.value = "Failed to decrypt HTML"
+		branch.setCharPref("msg_ipc", "Failed to decrypt HTML. Please let the developers know")
+
 	}
 	else {
 		info.value = "Internal Error"
- 		throw "incorrect value header";
+ 		branch.setCharPref("Internal Error. Unexpected value: "+value+". Please let the developers knows")
 	}
-	//TODO close this listener
 }
 
+function check_escrowtrace(){
+	
+	
+}
 
 function setSSLPrefs() {
 	ssl_prefs = prefs.getBranch("security.ssl3.");
@@ -191,97 +216,37 @@ function sum_input() {
 }
 
 function clearSSLCache() {
-      	var button_yellow = document.getElementById("button_yellow");
-      	var button_grey2 = document.getElementById("button_grey2");
+    var button_yellow = document.getElementById("button_yellow");
+    var button_grey2 = document.getElementById("button_grey2");
 	button_yellow.hidden = true
 	button_grey2.hidden = false
-	 var sdr = Components.classes["@mozilla.org/security/sdr;1"]
-                      .getService(Components.interfaces.nsISecretDecoderRing);
- 	 sdr.logoutAndTeardown();
+	Components.classes["@mozilla.org/security/sdr;1"].getService(Components.interfaces.nsISecretDecoderRing).logoutAndTeardown();
 	var button_green = document.getElementById("button_green");
 	var button_grey1 = document.getElementById("button_grey1");
 	button_grey1.hidden = true
 	button_green.hidden = false
 
+	var branch = Components.classes["@mozilla.org/preferences-service;1"]
+                    .getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
+
 	var info = document.getElementById("label_info");
 	info.value = "Now open the statement page and press the green button when page finishes loading"
+	branch.setCharPref("msg_ipc", "SSL cache has been cleared ")
 }
 
-function check_default_escrow(){
-	var prefs = Components.classes["@mozilla.org/preferences-service;1"]
-                    .getService(Components.interfaces.nsIPrefService);
-    prefs = prefs.getBranch("extensions.lspnr.");
-    var escrow_name = prefs.getCharPref("default_escrow")
-    var dnsname = prefs.getCharPref("escrow_"+escrow_name+".dnsname")
-    var getuserurl = prefs.getCharPref("escrow_"+escrow_name+".getuserurl")
-    var listmetricsurl = prefs.getCharPref("escrow_"+escrow_name+".listmetricsurl")
-    var describeinstancesurl = prefs.getCharPref("escrow_"+escrow_name+".describeinstancesurl")
-    var describevolumesurl = prefs.getCharPref("escrow_"+escrow_name+".describevolumesurl")
-    var getconsoleoutputurl = prefs.getCharPref("escrow_"+escrow_name+".getconsoleoutputurl")
-    base64string = btoa(getuserurl+" "+listmetricsurl+" "+describeinstancesurl+" "+describevolumesurl+" " + getconsoleoutputurl +" "+ dnsname)
 
-	var reqCheckEscrow = new XMLHttpRequest();
-	reqCheckEscrow.onload = responseCheckEscrow;
-	reqCheckEscrow.open("HEAD", "http://localhost:2222/check_oracle?"+base64string, true);
-	consoleService.logStringMessage("sending check_oracle request");
-	reqCheckEscrow.send();
-	//give 10 secs for escrow to respond
-	setTimeout(checkEscrowResponse, 1000, 0)
+//pin the addon tab on first run. It should remain pinned on subsequent runs
+setTimeout(function(){
+	var lspnr_prefs = Components.classes["@mozilla.org/preferences-service;1"]
+                    .getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
+    if (lspnr_prefs.getCharPref("first_run") != "true"){
+    	//FF always opens a home page even though our tab is pinned
+    	gBrowser.removeCurrentTab()
+    	return
+    }
+    lspnr_prefs.setCharPref("first_run", "false")
+	var tab = gBrowser.addTab("chrome://lspnr/content/home.html")
+	gBrowser.pinTab(tab)
+    gBrowser.removeCurrentTab()
 
-}
-
-function responseCheckEscrow(iteration){
-	if (typeof iteration == "number"){
-		if (iteration > 10){
-			alert("Oracle is taking more than 10 seconds to respond. Please try again")
-			return
-		}
-		setTimeout(responseCheckEscrow, 1000, iteration++)
-	}
-	//else: not a timeout but a response from the server
-}
-
-function startTunnel (dns_name, port){
-	var reqStartTunnel = new XMLHttpRequest();
-	reqStartTunnel.onload = responseStartTunnel;
-	reqStartTunnel.open("HEAD", "http://localhost:2222/start_tunnel?"+dns_name+";"+port, true);
-	consoleService.logStringMessage("sending start_tunnel request");
-	reqStartTunnel.send();
-	//give 10 secs for escrow to respond
-	setTimeout(responseStartTunnel, 1000, 0)
-
-}
-
-function responseStartTunnel(){
-	if (typeof iteration == "number"){
-		if (iteration > 10){
-			alert("Oracle is taking more than 10 seconds to respond. Please try again")
-			return
-		}
-		setTimeout(responseCheckEscrow, 1000, iteration++)
-	}
-	//else: not a timeout but a response from the server
-
-}
-
-//OBSOLETE but may be useful in the future
-
-//JS doesn't have a sleep() function due to its single-threadedness
-//we check every second if callback which listens for a response from the backend has received such a response and consequently
-//set the flag to true. If it didn't happen within timeout seconds, we let the callback know
-function waitForResponse(callback, flag, timeout, iteration) {
-	if (flag == true) return;
-	else {		  
-		if (iteration == timeout) {
-			callback("timeout")
-			return
-		}
-		iteration++;
-  		consoleService.logStringMessage("iteration No");
-  		consoleService.logStringMessage(iteration);
-		//non-standard setTimeout invocation, FF-specific
-		setTimeout(waitForResponse, 1000, callback, flag, timeout, iteration);
-	}
-}
-
-setTimeout(function(){loadURI("chrome://lspnr/content/home.html")}, 1000)
+}, 1000)

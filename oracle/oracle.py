@@ -9,7 +9,30 @@ import StringIO
 import fcntl
 import sys
 import random
+import BaseHTTPServer, SimpleHTTPServer                
 
+
+class StoppableHttpServer (BaseHTTPServer.HTTPServer):
+    """http server that reacts to self.stop flag"""
+    arg_in = ''
+    retval = ''
+    stop = False
+    timeout = 1 
+
+class HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
+    protocol_version = "HTTP/1.1"
+    
+    def do_GET(self):
+        txid = self.server.arg_in        
+        print ('minihttp received ' + self.path + ' request',end='\r\n')
+        self.path = "/stcppipelog/" + txid +".tar"
+        super(HandlerClass, self).do_GET()
+        self.server.stop = True
+        
+    def do_HEAD(self):
+        self.server.stop = True
+                
+    
 TESTING = False
 if sys.argv[1] == 'testing' if len(sys.argv)>1 else False: TESTING = True
 
@@ -126,8 +149,7 @@ def escrow_get_tarball(txid):
     
     database[index]['escrow_fetched_tarball'] = int(time.time())
     __UNLOCK_DB()
-    #Now that escrow confirmed safe receipt of the tarball, remove the logdir and the tarball
-    shutil.rmtree(os.path.join(stcppipe_logdir, txid))
+    #Now that escrow confirmed safe receipt of the tarball, remove the tarball
     os.remove(os.path.join(stcppipe_logdir, txid+'.tar'))
     return (0,'')
 
@@ -268,7 +290,7 @@ def thread_handle_txid(conn, txid, sshd_ppid):
             #there was no sslkey for 20 minutes, wrapping up
             os.kill(stcppipe_proc.pid, signal.SIGTERM)
             time.sleep(3)
-            shutil.rmtree(logdir)
+            if os.path.isdir(logdir): shutil.rmtree(logdir)
             cleanup_and_exit(conn, msg='Time limit expired. Connection closed', txid=txid)
             return
         
@@ -280,28 +302,29 @@ def thread_handle_txid(conn, txid, sshd_ppid):
                 ban_user(txid)
                 os.kill(stcppipe_proc.pid, signal.SIGTERM)
                 time.sleep(3)
-                shutil.rmtree(logdir)
+                if os.path.isdir(logdir): shutil.rmtree(logdir)
                 cleanup_and_exit(conn, msg='You have been banned. Contact escrow for details')
                 return
         
         if msg_in: 
             if msg_in.startswith(txid+'-cmd sslkey '):
-                sslkey = msg_in[len(txid+'-cmd sslkey '):]
-                if len(sslkey) > 180:
-                    os.kill(stcppipe_proc.pid, signal.SIGTERM)
-                    time.sleep(3)
-                    shutil.rmtree(logdir)
-                    cleanup_and_exit(conn, msg='Wrong sslkey length', txid=txid)
-                    return
                 os.kill(stcppipe_proc.pid, signal.SIGTERM)
-                time.sleep(3)            
-                finish_time = int(time.time())
+                time.sleep(3)
                 
-                sslkey_fd = open(os.path.join(logdir,'sslkey'), 'w')
-                sslkey_fd.write(sslkey+'\n')
-                sslkey_fd.close()
+                #commented out for ALPHA only
+                #sslkey = msg_in[len(txid+'-cmd sslkey '):]
+                #if len(sslkey) > 180:
+                    #shutil.rmtree(logdir)
+                    #cleanup_and_exit(conn, msg='Wrong sslkey length', txid=txid)
+                    #return                       
+                #sslkey_fd = open(os.path.join(logdir,'sslkey'), 'w')
+                #sslkey_fd.write(sslkey+'\n')
+                #sslkey_fd.close()
+                
+                finish_time = int(time.time())                
                 tar_path = os.path.join(stcppipe_logdir, txid+'.tar')
                 subprocess.call(['tar', 'cf', tar_path, logdir])
+                shutil.rmtree(logdir)                
                 output = subprocess.check_output(['sha256sum', tar_path])
                 sha_hash = output.split()[0]
                 
@@ -315,16 +338,54 @@ def thread_handle_txid(conn, txid, sshd_ppid):
                 database[index]['finished_banking'] = finish_time
                 database[index]['hash'] = sha_hash
                 __UNLOCK_DB()
-                cleanup_and_exit(conn, msg='Session ended successfully ', txid=txid)
-                return
+                
+                #ALPHA ONLY: expect the user to request the tarball
+                #setup a mini http server and listen for GET requests
+                print ('Starting mini http server',end='\r\n')
+                try:
+                    httpd = StoppableHttpServer(('127.0.0.1', str(port)), HandlerClass)
+                    httpd.arg_in = txid
+                except Exception, e:
+                    print ('Error starting mini http server', e,end='\r\n')
+                    os.remove(os.path.join(stcppipe_logdir, txid+'.tar'))                    
+                    cleanup_and_exit(conn, msg='Error starting mini http server', txid=txid)
+                    return()
+                starttime = time.time()
+                while not httpd.stop:
+                        httpd.handle_request()
+                        #we get here when timeout=1 triggers
+                        if time.time() - starttime > 120:
+                            print ('Tarball not requested in 2 mins', e,end='\r\n')
+                            os.remove(os.path.join(stcppipe_logdir, txid+'.tar'))                            
+                            cleanup_and_exit(conn, msg='Tarball not requested in 2 mins', txid=txid)
+                            return()
+                        
+                #now wait for user to send exit success or exit failure
+                
+                #cleanup_and_exit(conn, msg='Session ended successfully ', txid=txid)
+                #return
             
-            if msg_in == txid+'-cmd exit':
-                os.kill(stcppipe_proc.pid, signal.SIGTERM)
-                time.sleep(3)
-                shutil.rmtree(logdir)
+            #commented out for ALPHA only
+            #if msg_in == txid+'-cmd exit':
+                #os.kill(stcppipe_proc.pid, signal.SIGTERM)
+                #time.sleep(3)
+                #shutil.rmtree(logdir)
+                #cleanup_and_exit(conn, msg='User initiated shutdown', txid=txid)
+                #return
+            
+            #for ALPHA only
+            if msg_in.startswith(txid+'-cmd exit '):
+                result = msg_in[len(txid+'-cmd exit '):].split()[0]
+                dbresult = 1 if (result == 'success') else -1
+                __LOCK_DB
+                index = get_txid_index_in_db(txid, lock=False)
+                database[index]['escrow_fetched_tarball'] = dbresult
+                __UNLOCK_DB
+                
                 cleanup_and_exit(conn, msg='User initiated shutdown', txid=txid)
-                return
-            
+                return                
+                
+                
             else:
                 os.kill(stcppipe_proc.pid, signal.SIGTERM)
                 time.sleep(3)

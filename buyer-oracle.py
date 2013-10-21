@@ -2,6 +2,7 @@ from __future__ import print_function
 
 import base64
 import BaseHTTPServer
+import hashlib
 import os
 import random
 import re
@@ -11,6 +12,7 @@ import signal
 import SimpleHTTPServer
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 import urllib
@@ -18,7 +20,7 @@ from xml.dom import minidom
 
 #TESTING = True
 #BETA_TESTING means the users have to enter accno and sum themselves via FF addon
-BETA_TESTING = False
+ALPHA_TESTING = False
 
 
 installdir = os.path.dirname(os.path.realpath(__file__))
@@ -31,11 +33,14 @@ ssh_exepath = 'ssh'
 ssh_logfile = os.path.join(installdir, 'ssh.log')
 #ssh_exepath = os.path.join(installdir, 'putty')
 buyer_http_port = 2222
-random_stcppipe_port = 0
+random_ssh_port = 0
 oracle_snapID ='snap-f2596bf0'
 
 accno = None
 sum_ = None
+stcppipe_proc = ssh_proc = None
+html_hash = None
+assigned_port = None
 
 #a thread which returns a value. This is achieved by passing self as the first argument to a called function
 #the calling function can then set self.retval
@@ -64,7 +69,7 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
         print ('minihttp received ' + self.path + ' request',end='\r\n')
         # example HEAD string "/page_marked?accno=12435678&sum=1234.56"        
         if self.path.startswith('/page_marked'):
-            if BETA_TESTING:
+            if ALPHA_TESTING:
                 params = []
                 for param_str in self.path.split('?')[1].split('&'):
                     paralist = param_str.split('=')
@@ -103,14 +108,28 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
                 self.server.stop = True
                 return
             #else
-            self.send_response(200)
-            self.send_header("response", "page_marked")
-            self.send_header("value", "success")
-            print ('sending success',end='\r\n')
-            super(buyer_HandlerClass, self).do_HEAD()
-            self.server.retval = 'success'
-            self.server.stop = True
-            return
+            #ALPHA only, request the tarball from oracle
+            #check whether escrow would also decrypt HTML
+            
+            result = decrypt_escrowtrace()
+            if result == "success":    
+                self.send_response(200)
+                self.send_header("response", "page_marked")
+                self.send_header("value", "success")
+                print ('sending success',end='\r\n')
+                super(buyer_HandlerClass, self).do_HEAD()
+                self.server.retval = 'success'
+                self.server.stop = True
+                return
+            else:
+                self.send_response(200)
+                self.send_header("response", "page_marked")
+                self.send_header("value", "failure")
+                print ('sending failure',end='\r\n')
+                super(buyer_HandlerClass, self).do_HEAD()
+                self.server.retval = 'failure'
+                self.server.stop = True
+                return                
         
         if self.path.startswith('/check_oracle'):
             base64str = self.path.split('?')[1]
@@ -125,15 +144,55 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
         if self.path.startswith('/start_tunnel'):
             arg_str = self.path.split('?')[1]
             args = arg_str.split(";")
-            if BETA_TESTING:
+            if ALPHA_TESTING:
                 key_name = "beta.key"
-            retval = start_tunnel(key_name, args[0], args[1])
+            global assigned_port
+            assigned_port = args[1]
+            retval = start_tunnel(key_name, args[0])
             self.send_response(200)
             self.send_header("response", "start_tunnel")
             self.send_header("value", retval[0])
             super(buyer_HandlerClass, self).do_HEAD()                   
     
-                
+#fetch the tarball; make sure HTML decrypts
+def decrypt_escrowtrace():
+    global ssh_proc
+    global random_ssh_port
+    global assigned_port
+    global html_hash
+    escrowtracedir = os.path.join(installdir, "escrowtrace")
+    ssh_proc.stdin.write('sslkey \n')
+    #give oracle some time to launch an httpd
+    time.sleep(5)
+    #send request to ssh's local forwarding port
+    oracle_url = urllib.urlopen("http://127.0.0.1:"+str(random_ssh_port)+"/the/name/doesnt/matter/because/the/oracle/will/serve/the/correct/file/anyway")
+    tarball = oracle_url.read()
+    tar_object = tarfile.open(fileobj=tarball)
+    tar_object.extractall(escrowtracedir)
+    tar_object.close()
+    
+    filelist = os.listdir(escrowtracedir)
+    mergecap_args = ['mergecap', '-w', 'merged'] + filelist
+    subprocess.call(mergecap_args, cwd=escrowtracedir)
+    output = subprocess.check_output(['tshark', '-r', os.path.join(escrowtracedir, 'merged'), '-Y', 'ssl and http.content_type contains html', '-o', 'ssl.keylog_file:'+ sslkey, '-o',  'http.ssl.port:'+str(assigned_port), '-x'])
+    if output == '': 
+        ssh_proc.stdin.write('exit failure\n')    
+        return "Failed to find HTML in escrowtrace"
+    html = get_html_from_asciidump(output)
+    if html == -1:
+        ssh_proc.stdin.write('exit failure\n')            
+        return "Failed to find HTML in ascii dump"
+    if html_hash != hashlib.md5(html).hexdigest() :
+        ssh_proc.stdin.write('exit failure\n')            
+        return "Escrowtrace's HTML doesn't match ours"
+    
+    ssh_proc.stdin.write('exit success\n')    
+    return "success"
+    
+    
+    
+    
+    
 
 #look at tshark's ascii dump to better understand the parsing taking place
 def get_html_from_asciidump(ascii_dump):
@@ -209,7 +268,8 @@ def get_html_from_asciidump(ascii_dump):
     
 
 def find_page(accno, amount):
-    global random_stcppipe_port
+    global random_ssh_port
+    global html_hash
     filelist = os.listdir(logdir)
     timestamps = []
     for f in filelist:
@@ -220,7 +280,7 @@ def find_page(accno, amount):
     for index, timestamp in enumerate(timestamps):
         print ('Processing file No:'+str(index), end='\r\n')
         filename = timestamp[0]
-        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html', '-o', 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_stcppipe_port), '-x'])
+        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html', '-o', 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port), '-x'])
         if output == '': continue
         #multiple frames are dumped ascendingly. Process from the latest to the earlier.
         frames = output.split('\n\nFrame (')
@@ -238,6 +298,7 @@ def find_page(accno, amount):
             if html.find(amount) == -1:
                 print ('Amount not found in HTML', end='\r\n')
                 continue
+            html_hash = hashlib.md5(html).hexdigest()
             return ['success', filename, len(frames)]
     return ['Data not found in HTML']
 
@@ -247,7 +308,7 @@ def is_clear_cache_needed(filename, frames_no):
     if frames_no > 1:
         print ('Extra HTML file found in the TCP stream', end='\r\n')
         return True
-    output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.request.method==POST', '-o', 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_stcppipe_port)])
+    output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.request.method==POST', '-o', 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port)])
     if output != '':
         print ('POST request found in the TCP stream', end='\r\n')
         return True
@@ -269,7 +330,7 @@ def extract_ssl_key(filename):
         tmpkey_fd.write(key+'\n')
         tmpkey_fd.flush()
         tmpkey_fd.close()
-        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html', '-o', 'ssl.keylog_file:'+ sslkey, '-o', 'http.ssl.port:'+str(random_stcppipe_port)])
+        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html', '-o', 'ssl.keylog_file:'+ sslkey, '-o', 'http.ssl.port:'+str(random_ssh_port)])
         if output == '': continue        
         #else key found
         
@@ -279,7 +340,7 @@ def extract_ssl_key(filename):
         filelist.remove(filename)
         mergecap_args = ['mergecap', '-w', 'merged'] + filelist
         subprocess.call(mergecap_args, cwd=logdir)
-        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http', '-o', 'ssl.keylog_file:'+ sslkey, '-o',  'http.ssl.port:'+str(random_stcppipe_port)])
+        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http', '-o', 'ssl.keylog_file:'+ sslkey, '-o',  'http.ssl.port:'+str(random_ssh_port)])
         if output != '':
             print ('The unthinkable happened. Our ssl key can decrypt another tcp stream', end='\r\n')
             exit(4)
@@ -372,6 +433,15 @@ def start_firefox():
             return 'File open error' 
         mfile.write("[ExtensionDirs]\nExtension0=" + os.path.join(ff_extensions_dir, "ssllog_addon") + "\n")
         mfile.close()
+        
+        #force displaying of add-on toolbar
+        try:
+            mfile = open (os.path.join(ff_user_dir, 'ssllog_profile', 'localstore.rdf'), "w+")
+        except Exception,e:
+            print ('File open error', e,end='\r\n')
+            return 'File open error' 
+        mfile.write(r'<?xml version="1.0"?><RDF:RDF xmlns:NC="http://home.netscape.com/NC-rdf#" xmlns:RDF="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><RDF:Description RDF:about="chrome://browser/content/browser.xul"><NC:persist RDF:resource="chrome://browser/content/browser.xul#addon-bar" collapsed="false"/></RDF:Description></RDF:RDF>')
+        mfile.close()        
         
 
     #SSLKEYLOGFILE
@@ -544,17 +614,18 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
 
 #privkey_file should correspond to RSA public key registered on oracle
 #assigned_port should be provided by the escrow
-def start_tunnel(privkey_file, oracle_address, assigned_port):
+def start_tunnel(privkey_file, oracle_address):
+    global assigned_port
     if os.path.isdir(logdir) : shutil.rmtree(logdir)
     os.mkdir(logdir)
     
-    global random_stcppipe_port
-    random_stcppipe_port = random.randint(1025,65535)
-    stcppipe_proc = subprocess.Popen([stcppipe_exepath, '-d', logdir, '-b', '127.0.0.1', str(random_stcppipe_port), '8080'])
+    global random_ssh_port
+    random_ssh_port = random.randint(1025,65535)
+    stcppipe_proc = subprocess.Popen([stcppipe_exepath, '-d', logdir, '-b', '127.0.0.1', str(random_ssh_port), '8080'])
     time.sleep(1)
     if stcppipe_proc.poll() != None:
         return ['stcppipe error']
-    ssh_proc = subprocess.Popen([ssh_exepath, '-i', privkey_file, '-o', 'StrictHostKeyChecking=no', 'ubuntu@'+oracle_address, '-L', str(random_stcppipe_port)+':localhost:'+assigned_port], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    ssh_proc = subprocess.Popen([ssh_exepath, '-i', privkey_file, '-o', 'StrictHostKeyChecking=no', 'ubuntu@'+oracle_address, '-L', str(random_ssh_port)+':localhost:'+assigned_port], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     #give sshd some time to disconnect us if it has to 
     time.sleep(3)
     if ssh_proc.poll() != None:
@@ -653,21 +724,23 @@ if __name__ == "__main__":
     #we get here when thread terminates
     os.kill(stcppipe_proc.pid, signal.SIGTERM)
     
-    if thread.retval == 'failure':
-        print ("Could not decrypt HTML locally", end='\r\n')
-        ssh_proc.stdin.write('exit\n')
-        exit(1)  
-        
-    elif thread.retval != 'success':
-        print ("Internal error. Thread returned unknown value", end='\r\n')
-        ssh_proc.stdin.write('exit\n')
-        exit(1)
     
-    sslkey_fd = open(sslkey, 'r')
-    key_data = sslkey_fd.read()
-    sslkey_fd.close()
-    ssh_proc.stdin.write('sslkey '+key_data+'\n')
-    exit(0)
+    #commented out for ALPHA
+    #if thread.retval == 'failure':
+        #print ("Could not decrypt HTML locally", end='\r\n')
+        #ssh_proc.stdin.write('exit\n')
+        #exit(1)  
+        
+    #elif thread.retval != 'success':
+        #print ("Internal error. Thread returned unknown value", end='\r\n')
+        #ssh_proc.stdin.write('exit\n')
+        #exit(1)
+    
+    #sslkey_fd = open(sslkey, 'r')
+    #key_data = sslkey_fd.read()
+    #sslkey_fd.close()
+    #ssh_proc.stdin.write('sslkey '+key_data+'\n')
+    #exit(0)
     
 
     

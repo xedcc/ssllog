@@ -19,12 +19,145 @@
 </div>
 
 <div class="hero-unit">
-Welcome to Beta testing of LSPNR [&#230;l'spuner]
-Decentralized fiat to BTC exchange.
+Welcome to Beta testing of Paysty  ['peisti]. A decentralized and fully open-source fiat to BTC exchange.
 </div>
-<button class="btn btn-primary btn-lg">Start the fun</button>
+<button class="btn btn-primary btn-lg" style="margin-bottom:30px;" onclick="startPressed()">Start the fun</button>
+
+<p>Below you'll see everything that is going on under the hood so that you could report to developers in case of a problem:</p>
+<textarea id="textarea" cols="40" rows="5" type="text" name="message" style="width:100%;resize:none;" readonly>
+</textarea>
 
 </div>
+
+
+<script>
+
+document.getElementById("textarea").value = ""
+//endless loop. Other pages use preferences to send info that needs to be logged.
+getMsg()
+function getMsg() {
+    var branch = Components.classes["@mozilla.org/preferences-service;1"]
+                    .getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
+    var msg = branch.getCharPref("msg_ipc")
+    if (msg == ""){
+        setTimeout(getMsg, 1000);
+        return
+    }
+    textarea = document.getElementById("textarea") 
+    textarea.value += new Date().toUTCString() + " " + msg+"\n"
+    branch.setCharPref("msg_ipc", "")
+    textarea.scrollTop = textarea.scrollHeight;
+    setTimeout(getMsg, 100);
+}
+
+
+function startPressed(){
+    check_default_escrow()
+    //when response is received startTunnel() will be called from within the response handler
+}
+
+function startTunnel (){
+    var prefs = Components.classes["@mozilla.org/preferences-service;1"]
+                    .getService(Components.interfaces.nsIPrefService);
+    prefs = prefs.getBranch("extensions.lspnr.");
+    branch.setCharPref("msg_ipc", "Asking backend to start tunnel")
+    var escrow_name = prefs.getCharPref("default_escrow")
+    var dnsname = prefs.getCharPref("escrow_"+escrow_name+".dnsname")
+    //user ID is actually the forwarding port on oracle
+    var port = prefs.getCharPref("uid")
+
+    var reqStartTunnel = new XMLHttpRequest();
+    reqStartTunnel.onload = responseStartTunnel;
+    reqStartTunnel.open("HEAD", "http://localhost:2222/start_tunnel?"+dnsname+";"+port, true);
+    reqStartTunnel.send();
+    //give 10 secs for escrow to respond
+    setTimeout(responseStartTunnel, 1000, 0, reqStartTunnel)
+
+}
+
+function responseStartTunnel(iteration, request_handle){
+    if (typeof iteration == "number"){
+        if (iteration > 20){
+            branch.setCharPref("msg_ipc", "Oracle is taking more than 20 seconds to respond. Please check your internet connection and try again")
+            return
+        }
+        setTimeout(responseCheckEscrow, 1000, iteration++, request_handle)
+    }
+    //else: not a timeout but a response from the server
+    var query = request_handle.getResponseHeader("response");
+    var value = request_handle.getResponseHeader("value");
+    if (query != "start_tunnel"){
+        branch.setCharPref("msg_ipc", "Internal error. Wrong response header: "+query)
+        return
+    }
+    if (value != "success"){
+        branch.setCharPref("msg_ipc", "Error while starting tunnel: "+ value +". Please let the developers know.")
+        return
+    }
+    branch.setCharPref("msg_ipc", "Tunnel started successfully")
+    after_tunnel_started()
+}
+
+
+function check_default_escrow(){
+    var prefs = Components.classes["@mozilla.org/preferences-service;1"]
+                    .getService(Components.interfaces.nsIPrefService);
+
+    var branch = prefs.getBranch("extensions.lspnr.");
+    branch.setCharPref("msg_ipc", "Asking backend to check oracle ")
+
+    var escrow_name = prefs.getCharPref("default_escrow")
+    var dnsname = prefs.getCharPref("escrow_"+escrow_name+".dnsname")
+    var getuserurl = prefs.getCharPref("escrow_"+escrow_name+".getuserurl")
+    var listmetricsurl = prefs.getCharPref("escrow_"+escrow_name+".listmetricsurl")
+    var describeinstancesurl = prefs.getCharPref("escrow_"+escrow_name+".describeinstancesurl")
+    var describevolumesurl = prefs.getCharPref("escrow_"+escrow_name+".describevolumesurl")
+    var getconsoleoutputurl = prefs.getCharPref("escrow_"+escrow_name+".getconsoleoutputurl")
+    base64string = btoa(getuserurl+" "+listmetricsurl+" "+describeinstancesurl+" "+describevolumesurl+" " + getconsoleoutputurl +" "+ dnsname)
+
+    var reqCheckEscrow = new XMLHttpRequest();
+    reqCheckEscrow.onload = responseCheckEscrow;
+    reqCheckEscrow.open("HEAD", "http://localhost:2222/check_oracle?"+base64string, true);
+    consoleService.logStringMessage("sending check_oracle request");
+    reqCheckEscrow.send();
+    //give 20 secs for escrow to respond
+    setTimeout(responseCheckEscrow, 1000, 0, reqCheckEscrow)    
+}
+
+function responseCheckEscrow(iteration, request_handle){
+     var branch = Components.classes["@mozilla.org/preferences-service;1"]
+                    .getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
+
+    if (typeof iteration == "number"){
+        if (iteration > 20){
+            branch.setCharPref("msg_ipc", "Oracle is taking more than 20 seconds to respond. Please check your internet connection and try again")
+            return
+        }
+        setTimeout(responseCheckEscrow, 1000, iteration++, request_handle)
+    }
+    //else: not a timeout but a response from the server
+    var query = request_handle.getResponseHeader("response");
+    var value = request_handle.getResponseHeader("value");
+    if (query != "check_oracle"){
+        branch.setCharPref("msg_ipc", "Internal error. Wrong response header: "+query)
+        return
+    }
+    if (value != "success"){
+        branch.setCharPref("msg_ipc", "Error while checkng oracle: "+ value +". Please let the developers know.")
+        return
+    }
+    branch.setCharPref("msg_ipc", "Oracle check successful")
+    startTunnel()
+}
+
+function after_tunnel_started(){
+    alert("You can now open a new tab and login into your bank. Follow the instruction on the panel below`")
+}
+
+
+
+
+</script>
 
 
 <script src="jquery-2.0.3.min.js"></script>
