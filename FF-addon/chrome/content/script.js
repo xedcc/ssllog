@@ -1,8 +1,16 @@
-var consoleService = Components.classes["@mozilla.org/consoleservice;1"]
-                                 .getService(Components.interfaces.nsIConsoleService);
-consoleService.logStringMessage("hello");
-var prefs = Components.classes["@mozilla.org/preferences-service;1"]
-                    .getService(Components.interfaces.nsIPrefService)
+// var consoleService = Components.classes["@mozilla.org/consoleservice;1"].getService(Components.interfaces.nsIConsoleService);
+var prefs = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService)
+var port = Components.classes["@mozilla.org/process/environment;1"].getService(Components.interfaces.nsIEnvironment).get("FF_to_backend_port")
+
+//Let the backend know that it can remove the splashscreen
+var reqStarted = new XMLHttpRequest();
+reqStarted.open("HEAD", "http://127.0.0.1:"+port+"/started", true);
+reqStarted.send();    
+
+var reqPageMarked
+var reqCheckEscrowtrace
+var isPageMarkedResponded = false
+var isCheckEscrowtraceResponded = false
 
 var browser_prefs = prefs.getBranch("browser.");
 browser_prefs.setCharPref("startup.homepage", "chrome://lspnr/content/home.html")
@@ -16,11 +24,10 @@ setSSLPrefs();
 setProxyPrefs();
 setMiscPrefs();
 
-//Simply send a HEAD request to the python backend to localhost:2222/blabla. Backend treats "/blabla" not as a path but as an API call
+//Simply send a HEAD request to the python backend to 127.0.0.1:2222/blabla. Backend treats "/blabla" not as a path but as an API call
 //Backend responds with HTTP headers "response":"blabla" and "value":<value from backend>
-function pageMarkedSignal(){
-	var branch = Components.classes["@mozilla.org/preferences-service;1"]
-                    .getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
+function pageMarked(){
+	var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
 
 	var button_green = document.getElementById("button_green");
 	var button_grey1 = document.getElementById("button_grey1");
@@ -51,11 +58,11 @@ function pageMarkedSignal(){
 
 		textbox_sum.disabled = true
 		textbox_accno.disabled = true
-		var accno_str = textbox_accno.value
-		var sum_str = textbox_sum.value
 		pressed_green_once=true
 	}
-	var request_str = "http://localhost:2222/page_marked"
+	var accno_str = textbox_accno.value
+	var sum_str = textbox_sum.value
+	var request_str = "http://127.0.0.1:"+port+"/page_marked"
 	//Check if we are testing. In production mode, accno and sum are known in advance of opening FF
 	if (accno_str){
 		request_str += "?accno="
@@ -64,33 +71,31 @@ function pageMarkedSignal(){
 		request_str += sum_str
 	}
 	
-
   reqPageMarked = new XMLHttpRequest();
-  reqPageMarked.onload = pageMarkedSignalResponse;
+  reqPageMarked.onload = responsePageMarked;
   reqPageMarked.open("HEAD", request_str, true);
-  consoleService.logStringMessage("sending page_marked request");
   reqPageMarked.send();
 
   info.value = "Asking backend if page was successfully decrypted"
   branch.setCharPref("msg_ipc", "Asking backend if HTML was successfully decrypted")
 
-  setTimeout(pageMarkedSignalResponse, 1000, 0, reqPageMarked)    
-
+  setTimeout(responsePageMarked, 1000, 0)    
 }
 
 //backend responds to page_marked with either "success" ot "clear_ssl_cache"
-function pageMarkedSignalResponse (iteration, request_handle) {
-	var branch = Components.classes["@mozilla.org/preferences-service;1"]
-                    .getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
+function responsePageMarked (iteration) {
+	var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
 
     if (typeof iteration == "number"){
         if (iteration > 20){
             branch.setCharPref("msg_ipc", "Oracle is taking more than 20 seconds to respond. Please check your internet connection and try again")
             return
         }
-        setTimeout(pageMarkedSignalResponse, 1000, iteration++, request_handle)
+        if (!isPageMarkedResponded) setTimeout(responsePageMarked, 1000, ++iteration)
+        return
     }
     //else: not a timeout but a response from the server
+    isPageMarkedResponded = true
 	var query = reqPageMarked.getResponseHeader("response");
 	var value = reqPageMarked.getResponseHeader("value");
 	var info = document.getElementById("label_info");
@@ -102,11 +107,12 @@ function pageMarkedSignalResponse (iteration, request_handle) {
 	if (value == "success") {
 		branch.setCharPref("msg_ipc", "HTML was decrypted successfully")
 		info.value = "HTML decrypted successfully. Checking escrow's trace now"
-		check_escrowtrace()
+		checkEscrowtrace()
 	}
 	else if (value == "clear_ssl_cache") {
 		var yellow_button = document.getElementById("button_yellow");
 		yellow_button.hidden = false
+		isPageMarkedResponded = false
 		branch.setCharPref("msg_ipc", "Try again. Navigate away and press yellow button and AFTER that click open your statement")
 		info.value = "Try again. Navigate away and press yellow button."
 	}
@@ -121,10 +127,58 @@ function pageMarkedSignalResponse (iteration, request_handle) {
 	}
 }
 
-function check_escrowtrace(){
-	
-	
+function checkEscrowtrace(){
+	var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
+	var info = document.getElementById("label_info");
+
+    info.value = "Asking for escrow trace"
+	branch.setCharPref("msg_ipc", "Asking for escrow trace to see if escrow would decrypt HTML successfully")
+
+	reqCheckEscrowtrace = new XMLHttpRequest();
+	reqCheckEscrowtrace.onload = responseCheckEscrowtrace;
+	reqCheckEscrowtrace.open("HEAD", "http://127.0.0.1:"+port+"/check_escrowtrace", true);
+	reqCheckEscrowtrace.send();
+
+	setTimeout(responseCheckEscrowtrace, 1000, 0)    
 }
+
+
+function responseCheckEscrowtrace (iteration) {
+	var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
+    var info = document.getElementById("label_info");
+
+    if (typeof iteration == "number"){
+        if (iteration > 40){
+            branch.setCharPref("msg_ipc", "Oracle is taking more than 40 seconds to respond. Please check your internet connection and try again")
+            return
+        }
+        if (!isCheckEscrowtraceResponded) setTimeout(responseCheckEscrowtrace, 1000, ++iteration)
+        	return
+    }
+    //else: not a timeout but a response from the server
+    isCheckEscrowtraceResponded = true
+	var query = reqCheckEscrowtrace.getResponseHeader("response");
+	var value = reqCheckEscrowtrace.getResponseHeader("value");
+	if (query != "check_escrowtrace") {
+		info.value = "Internal Error"
+		branch.setCharPref("msg_ipc", "Internal error. Wrong response header: "+ query)
+		return
+	}
+	if (value == "success") {
+		branch.setCharPref("msg_ipc", "Escrow's HTML was decrypted successfully")
+		info.value = "Escrow's HTML decrypted successfully"
+		alert("Congratulations! Paysty can be used with your bank's website.")
+	}
+	else if (value == "failure") {
+		info.value = "Failed to decrypt escrow's HTML"
+		branch.setCharPref("msg_ipc", "Failed to decrypt escrow's HTML. Please let the developers know")
+	}
+	else {
+		info.value = "Internal Error"
+ 		branch.setCharPref("Internal Error. Unexpected value: "+value+". Please let the developers knows")
+	}
+}
+
 
 function setSSLPrefs() {
 	ssl_prefs = prefs.getBranch("security.ssl3.");
@@ -164,12 +218,14 @@ function setSSLPrefs() {
 }
 
 function setProxyPrefs(){
+	var port = Components.classes["@mozilla.org/process/environment;1"].getService(Components.interfaces.nsIEnvironment).get("FF_proxy_port")
+	var port_int = parseInt(port)
 	proxy_prefs = prefs.getBranch("network.proxy.");
 	proxy_prefs.setIntPref("type", 1);
 	proxy_prefs.setCharPref("http","127.0.0.1");
-	proxy_prefs.setIntPref("http_port", 8080);
+	proxy_prefs.setIntPref("http_port", port_int);
 	proxy_prefs.setCharPref("ssl","127.0.0.1");
-	proxy_prefs.setIntPref("ssl_port", 8080);
+	proxy_prefs.setIntPref("ssl_port", port_int);
 }
 
 function setMiscPrefs(){
@@ -180,13 +236,16 @@ function setMiscPrefs(){
 	spdy_prefs.setBoolPref("enabled.v3",false);
 
 	cache_disk_prefs = prefs.getBranch("browser.cache.disk.");	
-	cache_disk_prefs.setBoolPref("enabled", false)
+	cache_disk_prefs.setBoolPref("enable", false)
 	
 	cache_memory_prefs = prefs.getBranch("browser.cache.memory.");
-	cache_memory_prefs.setBoolPref("enabled", false);
+	cache_memory_prefs.setBoolPref("enable", false);
 	
 	cache_prefs = prefs.getBranch("browser.cache.");
 	cache_prefs.setBoolPref("disk_cache_ssl", false);
+
+	network_http_prefs = prefs.getBranch("network.http.");
+	network_http_prefs.setBoolPref("use-cache", false);
 }
 
 function accno_input() {
@@ -226,9 +285,7 @@ function clearSSLCache() {
 	button_grey1.hidden = true
 	button_green.hidden = false
 
-	var branch = Components.classes["@mozilla.org/preferences-service;1"]
-                    .getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
-
+	var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
 	var info = document.getElementById("label_info");
 	info.value = "Now open the statement page and press the green button when page finishes loading"
 	branch.setCharPref("msg_ipc", "SSL cache has been cleared ")
@@ -249,4 +306,4 @@ setTimeout(function(){
 	gBrowser.pinTab(tab)
     gBrowser.removeCurrentTab()
 
-}, 1000)
+}, 2000)

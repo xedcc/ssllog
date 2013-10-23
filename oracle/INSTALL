@@ -33,6 +33,8 @@ oracle.py       to /home/ubuntu		 perm 600	ubuntu:ubuntu
 stub.py         to /home/ubuntu		 perm 600	ubuntu:ubuntu	
 stcppipe.zip    to /home/ubuntu		 perm 600	ubuntu:ubuntu
 
+Make sure that e2label /dev/xvd(mounted volume) gives you "cloudimg-rootfs"
+
 "umount" the volume and detach it in the AWS console.
 Create a public snapshot from the volume and note the snapshot ID.
 
@@ -75,6 +77,8 @@ e.g. 3ef4568f919b1defa995df57650e226fa2acfc3924bc4494943286cf42647952
 find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum
 e.g. 8914bc0302a8c1b087bba10ff973b0c5fe05381e4644500741beb712c9bd8a21
 
+e2label /dev/xvd(the letter of the attached volume)
+cloudimg-rootfs
 
 -------------------------------------------------------------------------------
 HOW CAN A THIRD PARTY DETERMINE THAT THE RUNNING ORACLE INSTANCE HAS NOT BEEN TAMPERED WITH.

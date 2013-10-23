@@ -1,15 +1,16 @@
-import socket
+import BaseHTTPServer
+import fcntl
 import os
+import random
+import shutil
+import signal
+import SimpleHTTPServer                
+import socket
+import StringIO
+import subprocess
+import sys
 import threading
 import time
-import subprocess
-import signal
-import shutil
-import StringIO
-import fcntl
-import sys
-import random
-import BaseHTTPServer, SimpleHTTPServer                
 
 
 class StoppableHttpServer (BaseHTTPServer.HTTPServer):
@@ -24,7 +25,7 @@ class HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
     
     def do_GET(self):
         txid = self.server.arg_in        
-        print ('minihttp received ' + self.path + ' request',end='\r\n')
+        print ('minihttp received ' + self.path + ' request')
         self.path = "/stcppipelog/" + txid +".tar"
         super(HandlerClass, self).do_GET()
         self.server.stop = True
@@ -156,14 +157,15 @@ def escrow_get_tarball(txid):
 
 def cleanup_and_exit(conn, txid=0,  msg=''):
     if txid !=0:
-        index = get_txid_index_in_db(txid)
+        __LOCK_DB()        
+        index = get_txid_index_in_db(txid, lock=False)
         if index < 0:
+            __UNLOCK_DB()            
             print('Session finished. Transaction ID not found in database')
             conn.send('Session finished. Transaction ID not found in database')
             time.sleep(1)
             conn.close()
             return
-        __LOCK_DB()
         is_logged_in = database[index]['is_logged_in_now']
         database[index]['is_logged_in_now'] = False
         __UNLOCK_DB()
@@ -278,9 +280,9 @@ def thread_handle_txid(conn, txid, sshd_ppid):
     #wait for sslkey from the user
     last_dos_check = start_time
     conn.settimeout(1 if TESTING else 10)
-    msg_in = None
     while 1:
         try:
+            msg_in = None            
             msg_in = conn.recv(1024)
         except:
             #timeout reached
@@ -297,17 +299,19 @@ def thread_handle_txid(conn, txid, sshd_ppid):
         #Anti DOS measure. Every minute make sure the user is not overwhelming the logdir with data or new files(generated on every new connection). Limits: 1000 files or 50MB of data
         if current_time-last_dos_check > 60:
             last_dos_check = current_time
-            filelist = os.listdir(logdir)
-            if len(filelist) > 1000 or sum([os.path.getsize(os.path.join(logdir,f)) for f in filelist]) > 50000000:
-                ban_user(txid)
-                os.kill(stcppipe_proc.pid, signal.SIGTERM)
-                time.sleep(3)
-                if os.path.isdir(logdir): shutil.rmtree(logdir)
-                cleanup_and_exit(conn, msg='You have been banned. Contact escrow for details')
-                return
+            #ALPHA only: make sure logdir still exists. It might have been deleted and we are still waiting on exit success/failure
+            if os.path.isdir(logdir):
+                filelist = os.listdir(logdir)
+                if len(filelist) > 1000 or sum([os.path.getsize(os.path.join(logdir,f)) for f in filelist]) > 50000000:
+                    ban_user(txid)
+                    os.kill(stcppipe_proc.pid, signal.SIGTERM)
+                    time.sleep(3)
+                    if os.path.isdir(logdir): shutil.rmtree(logdir)
+                    cleanup_and_exit(conn, msg='You have been banned. Contact escrow for details')
+                    return
         
         if msg_in: 
-            if msg_in.startswith(txid+'-cmd sslkey '):
+            if msg_in.startswith(txid+'-cmd sslkey'):
                 os.kill(stcppipe_proc.pid, signal.SIGTERM)
                 time.sleep(3)
                 
@@ -323,7 +327,7 @@ def thread_handle_txid(conn, txid, sshd_ppid):
                 
                 finish_time = int(time.time())                
                 tar_path = os.path.join(stcppipe_logdir, txid+'.tar')
-                subprocess.call(['tar', 'cf', tar_path, logdir])
+                subprocess.call(['tar', 'cf', tar_path, '-C', logdir, '.'])
                 shutil.rmtree(logdir)                
                 output = subprocess.check_output(['sha256sum', tar_path])
                 sha_hash = output.split()[0]
@@ -341,12 +345,12 @@ def thread_handle_txid(conn, txid, sshd_ppid):
                 
                 #ALPHA ONLY: expect the user to request the tarball
                 #setup a mini http server and listen for GET requests
-                print ('Starting mini http server',end='\r\n')
+                print ('Starting mini http server')
                 try:
-                    httpd = StoppableHttpServer(('127.0.0.1', str(port)), HandlerClass)
+                    httpd = StoppableHttpServer(('127.0.0.1', port), HandlerClass)
                     httpd.arg_in = txid
                 except Exception, e:
-                    print ('Error starting mini http server', e,end='\r\n')
+                    print ('Error starting mini http server')
                     os.remove(os.path.join(stcppipe_logdir, txid+'.tar'))                    
                     cleanup_and_exit(conn, msg='Error starting mini http server', txid=txid)
                     return()
@@ -355,12 +359,13 @@ def thread_handle_txid(conn, txid, sshd_ppid):
                         httpd.handle_request()
                         #we get here when timeout=1 triggers
                         if time.time() - starttime > 120:
-                            print ('Tarball not requested in 2 mins', e,end='\r\n')
+                            print ('Tarball not requested in 2 mins')
                             os.remove(os.path.join(stcppipe_logdir, txid+'.tar'))                            
                             cleanup_and_exit(conn, msg='Tarball not requested in 2 mins', txid=txid)
                             return()
-                        
                 #now wait for user to send exit success or exit failure
+                continue
+                        
                 
                 #cleanup_and_exit(conn, msg='Session ended successfully ', txid=txid)
                 #return
@@ -374,8 +379,17 @@ def thread_handle_txid(conn, txid, sshd_ppid):
                 #return
             
             #for ALPHA only
-            if msg_in.startswith(txid+'-cmd exit '):
-                result = msg_in[len(txid+'-cmd exit '):].split()[0]
+            if msg_in.startswith(txid+'-cmd exit'):
+                result = None
+                result_in_list = msg_in[len(txid+'-cmd exit'):].split()
+                if len(result_in_list) == 0:
+                    #user just sent "exit"
+                    os.kill(stcppipe_proc.pid, signal.SIGTERM)                    
+                    if os.path.isdir(logdir): shutil.rmtree(logdir)                    
+                    cleanup_and_exit(conn, msg='User terminated abruptly', txid=txid)
+                    return  
+                else:
+                    result = result_in_list[0]
                 dbresult = 1 if (result == 'success') else -1
                 __LOCK_DB
                 index = get_txid_index_in_db(txid, lock=False)
@@ -389,7 +403,7 @@ def thread_handle_txid(conn, txid, sshd_ppid):
             else:
                 os.kill(stcppipe_proc.pid, signal.SIGTERM)
                 time.sleep(3)
-                shutil.rmtree(logdir)
+                if os.path.isdir(logdir): shutil.rmtree(logdir)
                 cleanup_and_exit(conn, msg='Unknown command received. Expected "sslkey or exit"', txid=txid)
                 return
     

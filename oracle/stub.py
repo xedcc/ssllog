@@ -67,7 +67,7 @@ if not TESTING:
     file_data = access_file.read()
     lines = file_data.split()    
     lines.reverse()
-    limit = 20 if txid == 'escrow-id' else 5
+    limit = 200 if txid == 'escrow-id' else 100
     for index,timestamp in enumerate(lines):
         if int(current_timestamp) - int(timestamp) < 3600:
             if index > limit:
