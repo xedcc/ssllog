@@ -46,7 +46,7 @@ stcppipe_proc = ssh_proc = None
 html_hash = None
 assigned_port = None
 #username = "ubuntu"
-username = "ubuntu"
+username = "default2"
 is_ff_started = False
 is_tk_destroyed = False
 
@@ -85,7 +85,8 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
                 global accno
                 global sum_
                 accno = params[0]['accno']
-                sum_ = params[1]['sum']           
+                sum_ = params[1]['sum']
+                was_clear_cache_called = params[2]['was_clearcache_called']
             result = find_page(accno, sum_)
             if result[0] != 'success':
                 print ('sending failure. Reason: '+result[0] ,end='\r\n')
@@ -98,7 +99,7 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
                 return
             #else
             filename, frames_no = result[1:3]
-            if is_clear_cache_needed(filename, frames_no):    
+            if is_clear_cache_needed(filename, frames_no, first_time=True if was_clear_cache_called == 'no' else False):    
                 self.send_response(200)
                 self.send_header("response", "page_marked")
                 self.send_header("value", "clear_ssl_cache")
@@ -358,15 +359,17 @@ def find_page(accno, amount):
 
 
 #make sure there is no unwanted data (other HTML or POSTs) in that file/TCP stream
-def is_clear_cache_needed(filename, frames_no):
+#after the first sslclearcache it is OK to have POSTs because we know for sure that they don't contain logins/passwords
+def is_clear_cache_needed(filename, frames_no, first_time=False):
     if frames_no > 1:
         print ('Extra HTML file found in the TCP stream', end='\r\n')
         return True
-    output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.request.method==POST', '-o', 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port)])
-    if output != '':
-        print ('POST request found in the TCP stream', end='\r\n')
-        return True
-    return False
+    if first_time:
+        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.request.method==POST', '-o', 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port)])
+        if output != '':
+            print ('POST request found in the TCP stream', end='\r\n')
+            return True
+        return False
 
 
 def extract_ssl_key(filename):
@@ -496,6 +499,8 @@ def start_firefox():
         
 
     #SSLKEYLOGFILE
+    if os.path.isfile(sslkeylog): os.remove(sslkeylog)
+    open(sslkeylog,'w').close()
     os.putenv("SSLKEYLOGFILE", sslkeylog)
     os.putenv("FF_to_backend_port", str(FF_to_backend_port))
     os.putenv("FF_proxy_port", str(FF_proxy_port))

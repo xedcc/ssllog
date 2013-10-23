@@ -12,6 +12,7 @@ var reqCheckEscrowtrace
 var isPageMarkedResponded = false
 var isCheckEscrowtraceResponded = false
 
+//do this first and foremost to avoid being nagged
 var browser_prefs = prefs.getBranch("browser.");
 browser_prefs.setCharPref("startup.homepage", "chrome://lspnr/content/home.html")
 browser_prefs.setBoolPref("shell.checkDefaultBrowser", false)
@@ -19,6 +20,7 @@ browser_prefs.setBoolPref("shell.checkDefaultBrowser", false)
 var is_accno_entered = false;
 var is_sum_entered = false;
 var pressed_green_once = false;
+var was_clearcache_called = false;
 
 setSSLPrefs();
 setProxyPrefs();
@@ -27,8 +29,6 @@ setMiscPrefs();
 //Simply send a HEAD request to the python backend to 127.0.0.1:2222/blabla. Backend treats "/blabla" not as a path but as an API call
 //Backend responds with HTTP headers "response":"blabla" and "value":<value from backend>
 function pageMarked(){
-	var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
-
 	var button_green = document.getElementById("button_green");
 	var button_grey1 = document.getElementById("button_grey1");
 	var textbox_sum = document.getElementById("textbox_sum");
@@ -70,25 +70,28 @@ function pageMarked(){
 		request_str += "&sum="
 		request_str += sum_str
 	}
+	if (was_clearcache_called){
+		request_str += "&was_clearcache_called=yes"
+	}
+	else{
+		request_str += "&was_clearcache_called=no"
+	}
 	
   reqPageMarked = new XMLHttpRequest();
   reqPageMarked.onload = responsePageMarked;
   reqPageMarked.open("HEAD", request_str, true);
   reqPageMarked.send();
 
-  info.value = "Asking backend if page was successfully decrypted"
-  branch.setCharPref("msg_ipc", "Asking backend if HTML was successfully decrypted")
-
-  setTimeout(responsePageMarked, 1000, 0)    
+  	log("Finding HTML in our data")
+	isPageMarkedResponded = false
+  	setTimeout(responsePageMarked, 1000, 0)    
 }
 
 //backend responds to page_marked with either "success" ot "clear_ssl_cache"
 function responsePageMarked (iteration) {
-	var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
-
     if (typeof iteration == "number"){
         if (iteration > 20){
-            branch.setCharPref("msg_ipc", "Oracle is taking more than 20 seconds to respond. Please check your internet connection and try again")
+            log("Oracle is taking more than 20 seconds to respond. Please check your internet connection and try again")
             return
         }
         if (!isPageMarkedResponded) setTimeout(responsePageMarked, 1000, ++iteration)
@@ -100,39 +103,28 @@ function responsePageMarked (iteration) {
 	var value = reqPageMarked.getResponseHeader("value");
 	var info = document.getElementById("label_info");
 	if (query != "page_marked") {
-		info.value = "Internal Error"
-		branch.setCharPref("msg_ipc", "Internal error. Wrong response header: "+ query)
-		return
+		log("Internal error. Wrong response header: "+ query)
 	}
 	if (value == "success") {
-		branch.setCharPref("msg_ipc", "HTML was decrypted successfully")
-		info.value = "HTML decrypted successfully. Checking escrow's trace now"
-		checkEscrowtrace()
+		log("SUCCESS finding HTML. Now finding the same HTML in escrow's data")
+		setTimeout(checkEscrowtrace, 1000)
 	}
 	else if (value == "clear_ssl_cache") {
-		var yellow_button = document.getElementById("button_yellow");
-		yellow_button.hidden = false
-		isPageMarkedResponded = false
-		branch.setCharPref("msg_ipc", "Try again. Navigate away and press yellow button and AFTER that click open your statement")
-		info.value = "Try again. Navigate away and press yellow button."
+		//var yellow_button = document.getElementById("button_yellow");
+		//yellow_button.hidden = false
+		clearSSLCache()
+		log("Please refresh this page and press blue button again")
 	}
 	else if (value == "failure") {
-		info.value = "Failed to decrypt HTML"
-		branch.setCharPref("msg_ipc", "Failed to decrypt HTML. Please let the developers know")
-
+		log("FAILURE finding HTML. Please let the developers know")
 	}
 	else {
-		info.value = "Internal Error"
- 		branch.setCharPref("Internal Error. Unexpected value: "+value+". Please let the developers knows")
+ 		log("Internal Error. Unexpected value: "+value+". Please let the developers knows")
 	}
 }
 
 function checkEscrowtrace(){
-	var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
-	var info = document.getElementById("label_info");
-
-    info.value = "Asking for escrow trace"
-	branch.setCharPref("msg_ipc", "Asking for escrow trace to see if escrow would decrypt HTML successfully")
+	log("Asking for escrow's data in order to find HTML there")
 
 	reqCheckEscrowtrace = new XMLHttpRequest();
 	reqCheckEscrowtrace.onload = responseCheckEscrowtrace;
@@ -144,12 +136,9 @@ function checkEscrowtrace(){
 
 
 function responseCheckEscrowtrace (iteration) {
-	var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
-    var info = document.getElementById("label_info");
-
     if (typeof iteration == "number"){
         if (iteration > 40){
-            branch.setCharPref("msg_ipc", "Oracle is taking more than 40 seconds to respond. Please check your internet connection and try again")
+            log("Oracle is taking more than 40 seconds to respond. Please check your internet connection and try again")
             return
         }
         if (!isCheckEscrowtraceResponded) setTimeout(responseCheckEscrowtrace, 1000, ++iteration)
@@ -160,22 +149,17 @@ function responseCheckEscrowtrace (iteration) {
 	var query = reqCheckEscrowtrace.getResponseHeader("response");
 	var value = reqCheckEscrowtrace.getResponseHeader("value");
 	if (query != "check_escrowtrace") {
-		info.value = "Internal Error"
-		branch.setCharPref("msg_ipc", "Internal error. Wrong response header: "+ query)
-		return
+		log("Internal error. Wrong response header: "+ query)
 	}
 	if (value == "success") {
-		branch.setCharPref("msg_ipc", "Escrow's HTML was decrypted successfully")
-		info.value = "Escrow's HTML decrypted successfully"
-		alert("Congratulations! Paysty can be used with your bank's website.")
+		log("SUCCESS finding HTML in escrow's data")
+		alert("Congratulations! Paysty can be used with your bank's website. You may now logout from your bank and close this Firefox window")
 	}
 	else if (value == "failure") {
-		info.value = "Failed to decrypt escrow's HTML"
-		branch.setCharPref("msg_ipc", "Failed to decrypt escrow's HTML. Please let the developers know")
+		log("FAILURE finding HTML in escrow's data. Please let the developers know")
 	}
 	else {
-		info.value = "Internal Error"
- 		branch.setCharPref("Internal Error. Unexpected value: "+value+". Please let the developers knows")
+ 		log("Internal Error. Unexpected value: "+value+". Please let the developers knows")
 	}
 }
 
@@ -275,20 +259,23 @@ function sum_input() {
 }
 
 function clearSSLCache() {
-    var button_yellow = document.getElementById("button_yellow");
-    var button_grey2 = document.getElementById("button_grey2");
-	button_yellow.hidden = true
-	button_grey2.hidden = false
+ //    var button_yellow = document.getElementById("button_yellow");
+ //    var button_grey2 = document.getElementById("button_grey2");
+	// button_yellow.hidden = true
+	// button_grey2.hidden = false
 	Components.classes["@mozilla.org/security/sdr;1"].getService(Components.interfaces.nsISecretDecoderRing).logoutAndTeardown();
+	was_clearcache_called = true
 	var button_green = document.getElementById("button_green");
 	var button_grey1 = document.getElementById("button_grey1");
 	button_grey1.hidden = true
 	button_green.hidden = false
+}
 
+function log(string){
 	var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
 	var info = document.getElementById("label_info");
-	info.value = "Now open the statement page and press the green button when page finishes loading"
-	branch.setCharPref("msg_ipc", "SSL cache has been cleared ")
+	info.value = string
+	branch.setCharPref("msg_ipc", string)
 }
 
 

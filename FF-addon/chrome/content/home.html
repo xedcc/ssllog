@@ -41,8 +41,7 @@ var isCheckEscrowResponded = false
 var isStartTunnelResponded = false
 
 var port = Components.classes["@mozilla.org/process/environment;1"].getService(Components.interfaces.nsIEnvironment).get("FF_to_backend_port")
-var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
-branch.setCharPref("msg_ipc", "")
+log("")
 document.getElementById("textarea").value = ""
 
 //endless loop. Other pages use preferences to send info that needs to be logged.
@@ -57,7 +56,8 @@ function getMsg() {
     }
     textarea = document.getElementById("textarea")
     now = new Date()
-    textarea.value += now.getHours()+":"+now.getMinutes()+":"+("0"+now.getSeconds()).slice(-2)+" " +msg+"\n"
+    //pad with leading zeroes when needed
+    textarea.value += ("0"+now.getHours()).slice(-2)+":"+("0"+now.getMinutes()).slice(-2)+":"+("0"+now.getSeconds()).slice(-2)+" " +msg+"\n"
     branch.setCharPref("msg_ipc", "")
     textarea.scrollTop = textarea.scrollHeight;
     setTimeout(getMsg, 10);
@@ -76,10 +76,9 @@ function startPressed(){
 }
 
 function startTunnel (){
-    var prefs = Components.classes["@mozilla.org/preferences-service;1"]
-                    .getService(Components.interfaces.nsIPrefService);
-    branch = prefs.getBranch("extensions.lspnr.");
-    branch.setCharPref("msg_ipc", "Asking backend to start tunnel")
+    var branch = Components.classes["@mozilla.org/preferences-service;1"]
+                    .getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.");
+    log("Asking backend to start tunnel")
     var escrow_name = branch.getCharPref("default_escrow")
     var dnsname = branch.getCharPref("escrow_"+escrow_name+".dnsname")
     //user ID is actually the forwarding port on oracle
@@ -94,10 +93,9 @@ function startTunnel (){
 }
 
 function responseStartTunnel(iteration){
-    var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.");
     if (typeof iteration == "number"){
         if (iteration > 20){
-            branch.setCharPref("msg_ipc", "Oracle is taking more than 20 seconds to respond. Please check your internet connection and try again")
+            log("Oracle is taking more than 20 seconds to respond. Please check your internet connection and try again")
             return
         }
         if (!isStartTunnelResponded) setTimeout(responseCheckEscrow, 1000, ++iteration)
@@ -108,22 +106,21 @@ function responseStartTunnel(iteration){
     var query = reqStartTunnel.getResponseHeader("response");
     var value = reqStartTunnel.getResponseHeader("value");
     if (query != "start_tunnel"){
-        branch.setCharPref("msg_ipc", "Internal error. Wrong response header: "+query)
+        log("Internal error. Wrong response header: "+query)
         return
     }
     if (value != "success"){
-        branch.setCharPref("msg_ipc", "Error while starting tunnel: "+ value +". Please let the developers know.")
+        log("Error while starting tunnel: "+ value +". Please let the developers know.")
         return
     }
-    branch.setCharPref("msg_ipc", "Tunnel started successfully")
+    log("SUCCESS. Tunnel started")
     setTimeout(after_tunnel_started, 1000)
 }
 
 function check_default_escrow(){
-    var prefs = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService);
+    var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.");
 
-    var branch = prefs.getBranch("extensions.lspnr.");
-    branch.setCharPref("msg_ipc", "Asking backend to check oracle ")
+    log("Checking oracle")
 
     var escrow_name = branch.getCharPref("default_escrow")
     var dnsname = branch.getCharPref("escrow_"+escrow_name+".dnsname")
@@ -143,12 +140,9 @@ function check_default_escrow(){
 }
 
 function responseCheckEscrow(iteration){
-    var branch = Components.classes["@mozilla.org/preferences-service;1"]
-                    .getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.");
-
     if (typeof iteration == "number"){
         if (iteration > 20){
-            branch.setCharPref("msg_ipc", "Oracle is taking more than 20 seconds to respond. Please check your internet connection and try again")
+            log("Oracle is taking more than 20 seconds to respond. Please check your internet connection and try again")
             return
         }
         if (!isCheckEscrowResponded) setTimeout(responseCheckEscrow, 1000, ++iteration)
@@ -160,14 +154,14 @@ function responseCheckEscrow(iteration){
     var value = reqCheckEscrow.getResponseHeader("value");
 
     if (query != "check_oracle"){
-        branch.setCharPref("msg_ipc", "Internal error. Wrong response header: "+query)
+        log("Internal error. Wrong response header: "+query)
         return
     }
     if (value != "success"){
-        branch.setCharPref("msg_ipc", "Error while checkng oracle: "+ value +". Please let the developers know.")
+        ("Error while checkng oracle: "+ value +". Please let the developers know.")
         return
     }
-    branch.setCharPref("msg_ipc", "Oracle check successful")
+    log("SUCCESS. Oracle checked")
     setTimeout(startTunnel, 1000)
 }
 
@@ -175,7 +169,10 @@ function after_tunnel_started(){
     alert("You can now open a new tab and login into your bank. Follow the instruction on the panel below`")
 }
 
-
+function log(string){
+    var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
+    branch.setCharPref("msg_ipc", string)
+}
 
 
 </script>
