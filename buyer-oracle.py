@@ -6,7 +6,6 @@ import hashlib
 import os
 import random
 import re
-import select
 import shutil
 import signal
 import SimpleHTTPServer
@@ -695,13 +694,9 @@ def start_tunnel(privkey_file, oracle_address):
     waiting_started = time.time()
     sshlog_fd = open(ssh_logfile, 'w')
     while 1:
-        rlist = []
-        rlist = select.select([ssh_proc.stderr],[],[], 1)[0]
-        if len(rlist) > 0 and ssh_proc.stderr not in rlist:
-            os.kill(stcppipe_proc.pid, signal.SIGTERM)
-            sshlog_fd.close()            
-            return 'select() error'           
-        if time.time() - waiting_started > 20:
+        time.sleep(1)
+        cmd = ssh_proc.stderr.readline()           
+        if time.time() - waiting_started > 2000:
             os.kill(stcppipe_proc.pid, signal.SIGTERM)
             sshlog_fd.close()
             return 'sshd was taking too long to respond'        
@@ -709,9 +704,6 @@ def start_tunnel(privkey_file, oracle_address):
             os.kill(stcppipe_proc.pid, signal.SIGTERM)
             sshlog_fd.close()                
             return 'ssh exited abruptly'
-        if len(rlist) == 0:
-            continue
-        cmd = ssh_proc.stderr.readline()
         if not cmd: continue        
         sshlog_fd.write(cmd+'\n')
         sshlog_fd.flush()
