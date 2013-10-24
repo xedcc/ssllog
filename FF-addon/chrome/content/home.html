@@ -6,7 +6,7 @@
     <link rel="stylesheet" href="css/bootstrap.min.css">
 </head>
 
-<body>
+<body onload="homepageLoaded()">
 <div class="container">
 <div class="navbar">
     <div class="navbar-inner">
@@ -34,6 +34,7 @@
 
 
 <script>
+log("Paysty started")
 
 var reqCheckEscrow
 var reqStartTunnel
@@ -42,7 +43,10 @@ var isStartTunnelResponded = false
 
 var port = Components.classes["@mozilla.org/process/environment;1"].getService(Components.interfaces.nsIEnvironment).get("FF_to_backend_port")
 log("")
-document.getElementById("textarea").value = ""
+
+function homepageLoaded () {
+    document.getElementById("textarea").value = ""
+}
 
 //endless loop. Other pages use preferences to send info that needs to be logged.
 getMsg()
@@ -62,7 +66,6 @@ function getMsg() {
     textarea.scrollTop = textarea.scrollHeight;
     setTimeout(getMsg, 10);
 }
-branch.setCharPref("msg_ipc", "Paysty started")
 
 function terminatePressed(){
     reqTerminate = new XMLHttpRequest();
@@ -71,6 +74,8 @@ function terminatePressed(){
 }
 
 function startPressed(){
+    var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
+    branch.setCharPref("start_new_session","true")
     check_default_escrow()
     //when response is received startTunnel() will be called from within the response handler
 }
@@ -110,7 +115,7 @@ function responseStartTunnel(iteration){
         return
     }
     if (value != "success"){
-        log("Error while starting tunnel: "+ value +". Please let the developers know.")
+        log("FAILURE starting tunnel: "+ value +". Please let the developers know.")
         return
     }
     log("SUCCESS. Tunnel started")
@@ -118,9 +123,8 @@ function responseStartTunnel(iteration){
 }
 
 function check_default_escrow(){
-    var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.");
-
     log("Checking oracle")
+    var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.");
 
     var escrow_name = branch.getCharPref("default_escrow")
     var dnsname = branch.getCharPref("escrow_"+escrow_name+".dnsname")

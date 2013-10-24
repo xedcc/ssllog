@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 from __future__ import print_function
 
 import base64
@@ -48,6 +49,7 @@ assigned_port = None
 username = "default2"
 is_ff_started = False
 is_tk_destroyed = False
+is_ssh_session_active = True
 
 #a thread which returns a value. This is achieved by passing self as the first argument to a called function
 #the calling function can then set self.retval
@@ -93,8 +95,6 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
                 self.send_header("response", "page_marked")
                 self.send_header("value", "failure")
                 self.end_headers()
-                self.server.retval = 'failure'
-                self.server.stop = True
                 return
             #else
             filename, frames_no = result[1:3]
@@ -112,16 +112,12 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
                 self.send_header("response", "page_marked")
                 self.send_header("value", "failure")
                 self.end_headers()
-                self.server.retval = 'failure'
-                self.server.stop = True
                 return
             if retval == 'success':
                 self.send_response(200)
                 self.send_header("response", "page_marked")
                 self.send_header("value", "success")
                 self.end_headers()
-                self.server.retval = 'success'
-                self.server.stop = True
                 return            
 
         if self.path.startswith('/check_oracle'):
@@ -166,8 +162,6 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
                 self.send_header("value", "success")
                 print ('sending success',end='\r\n')
                 self.end_headers()
-                self.server.retval = 'success'
-                self.server.stop = True
                 return
             else:
                 self.send_response(200)
@@ -175,17 +169,22 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
                 self.send_header("value", "failure")
                 print ('sending failure',end='\r\n')
                 self.end_headers()
-                self.server.retval = 'failure'
-                self.server.stop = True
                 return     
         
         if self.path.startswith('/terminate'):
             global ssh_proc
-            ssh_proc.stdin.write('exit\n')
+            global stcppipe_proc
+            global is_ssh_session_active
+            if is_ssh_session_active:
+                os.kill(stcppipe_proc.pid, signal.SIGTERM)
+                ssh_proc.stdin.write('exit\n')
+                ssh_proc.stdin.flush()
+                is_ssh_session_active = False
             self.send_response(200)
             self.send_header("response", "terminate")
             self.send_header("value", "success")
             self.end_headers()
+            time.sleep(2)
             return      
             
         if self.path.startswith('/started'):
@@ -334,7 +333,7 @@ def find_page(accno, amount):
     for index, timestamp in enumerate(timestamps):
         print ('Processing file No:'+str(index), end='\r\n')
         filename = timestamp[0]
-        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html', '-o', 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port), '-x'])
+        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html and http.response.code == 200', '-o', 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port), '-x'])
         if output == '': continue
         #multiple frames are dumped ascendingly. Process from the latest to the earlier.
         frames = output.split('\n\nFrame (')
@@ -399,7 +398,7 @@ def extract_ssl_key(filename):
         output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http', '-o', 'ssl.keylog_file:'+ sslkey, '-o',  'http.ssl.port:'+str(random_ssh_port)])
         if output != '':
             print ('The unthinkable happened. Our ssl key can decrypt another tcp stream', end='\r\n')
-            exit(4)
+            return 'The unthinkable happened. Our ssl key can decrypt another tcp stream'
             
         print ('SUCCESS unique ssl key found', end='\r\n')
         return 'success'
@@ -432,18 +431,19 @@ def start_firefox():
     homedir = os.path.expanduser("~")
     if homedir == "~":
         print ("Couldn't find user's home directory",end='\r\n')
-        return "Couldn't find user's home directory"
+        return ["Couldn't find user's home directory"]
     #todo allow user to specify firefox profile dir manually 
     ff_user_dir = os.path.join(homedir, ".mozilla", "firefox")   
     # skip this step if "ssllog" profile already exists
     if (not os.path.isdir(os.path.join(ff_user_dir, "ssllog_profile"))):
-        print ("Copying plugin files into Firefox's plugin directory",end='\r\n')
+        os.mkdir(os.path.join(ff_user_dir, 'ssllog_profile'))        
+        print ("Tweaking our profile's directory",end='\r\n')
        
         try:
             inifile = open(os.path.join(ff_user_dir, "profiles.ini"), "r+")
         except Exception,e: 
             print ('Could not open profiles.ini. Make sure it exists and you have sufficient read/write permissions',e,end='\r\n')
-            return 'Could not open profiles.ini'
+            return ['Could not open profiles.ini']
         text = inifile.read()
    
         #get the last profile number and increase it by 1 for our profile
@@ -454,36 +454,32 @@ def start_firefox():
             inifile.write('[Profile' +str(our_profile_number) + ']\nName=ssllog\nIsRelative=1\nPath=ssllog_profile\n\n')
         except Exception,e:
             print ('Could not write to profiles.ini. Make sure you have sufficient write permissions',e,end='\r\n')
-            return 'Could not write to profiles.ini'
+            return ['Could not write to profiles.ini']
         inifile.close()
     
-        #create an extension dir and copy the extension files
-        #we are not distributing our extension as xpi, but rather as a directory with files
-        os.mkdir(os.path.join(ff_user_dir, 'ssllog_profile'))
         ff_extensions_dir = os.path.join(ff_user_dir, "ssllog_profile", "extensions")
-        os.mkdir(ff_extensions_dir)
-        #todo handle mkdir exception
-        
+        os.mkdir(ff_extensions_dir)        
+        #extension dir contains a file with a path the the addon files in our installdir
         try:
             mfile = open (os.path.join(ff_extensions_dir, "lspnr@lspnr.net"), "w+")
         except Exception,e:
             print ('File open error', e,end='\r\n')
-            return 'File open error'
+            #return 'File open error'
         
         #write the path into the file
         try:
             mfile.write(os.path.join(installdir,"FF-addon"))
         except Exception,e:
             print ('File write error', e,end='\r\n')
-            return 'File write error'
+            return ['File write error']
         mfile.close()
         
         #prevent FF from prompting the user to install extenxion
         try:
-            mfile = open (os.path.join(ff_user_dir, 'ssllog_profile', 'extensions.ini'), "w+")
+            mfile = open (os.path.join(ff_user_dir, 'ssllog_profile', 'extensions.ini'), "w")
         except Exception,e:
             print ('File open error', e,end='\r\n')
-            return 'File open error' 
+            return ['File open error'] 
         mfile.write("[ExtensionDirs]\nExtension0=" + os.path.join(installdir,"FF-addon") + "\n")
         mfile.close()
         
@@ -492,7 +488,7 @@ def start_firefox():
             mfile = open (os.path.join(ff_user_dir, 'ssllog_profile', 'localstore.rdf'), "w+")
         except Exception,e:
             print ('File open error', e,end='\r\n')
-            return 'File open error' 
+            return ['File open error'] 
         mfile.write(r'<?xml version="1.0"?><RDF:RDF xmlns:NC="http://home.netscape.com/NC-rdf#" xmlns:RDF="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><RDF:Description RDF:about="chrome://browser/content/browser.xul"><NC:persist RDF:resource="chrome://browser/content/browser.xul#addon-bar" collapsed="false"/></RDF:Description></RDF:RDF>')
         mfile.close()        
         
@@ -505,13 +501,14 @@ def start_firefox():
     os.putenv("FF_proxy_port", str(FF_proxy_port))
     
     print ("Starting a new instance of Firefox with a new profile",end='\r\n')
+    if not os.path.isdir(os.path.join(installdir, 'firefox')): os.mkdir(os.path.join(installdir, 'firefox'))
     try:
-        subprocess.Popen([firefox_exepath,'-new-instance', '-P', 'ssllog'], stdout=open(os.path.join(installdir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(installdir, 'firefox', "firefox.stderr"), 'w'))
+        ff_proc = subprocess.Popen([firefox_exepath,'-new-instance', '-P', 'ssllog'], stdout=open(os.path.join(installdir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(installdir, 'firefox', "firefox.stderr"), 'w'))
     except Exception,e:
         print ("Error starting Firefox", e,end='\r\n')
-        return "Error starting Firefox"
+        return ["Error starting Firefox"]
     
-    return 'success'
+    return ['success', ff_proc]
 
 
 #using AWS query API make sure oracle meets the criteria
@@ -678,6 +675,7 @@ def start_tunnel(privkey_file, oracle_address):
     global ssh_proc
     global username
     global FF_proxy_port
+    global is_ssh_session_active
     
     if os.path.isdir(logdir) : shutil.rmtree(logdir)
     os.mkdir(logdir)
@@ -690,36 +688,43 @@ def start_tunnel(privkey_file, oracle_address):
         return 'stcppipe error'
     ssh_proc = subprocess.Popen([ssh_exepath, '-i', os.path.join(installdir, 'alphatest.key'), '-o', 'StrictHostKeyChecking=no', username+'@'+oracle_address, '-L', str(random_ssh_port)+':localhost:'+assigned_port], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     
+    is_ssh_session_active = True
     #give sshd 20 secs to respond with 'Tunnel ready'
     waiting_started = time.time()
     sshlog_fd = open(ssh_logfile, 'w')
     while 1:
-        time.sleep(1)
-        cmd = ssh_proc.stderr.readline()           
-        if time.time() - waiting_started > 2000:
-            os.kill(stcppipe_proc.pid, signal.SIGTERM)
-            sshlog_fd.close()
-            return 'sshd was taking too long to respond'        
-        if ssh_proc.poll() != None:
-            os.kill(stcppipe_proc.pid, signal.SIGTERM)
-            sshlog_fd.close()                
-            return 'ssh exited abruptly'
-        if not cmd: continue        
+        time.sleep(0.5)
+        cmd = ssh_proc.stderr.readline()
+        if not cmd:
+            if time.time() - waiting_started > 2000:
+                os.kill(stcppipe_proc.pid, signal.SIGTERM)
+                is_ssh_session_active = False
+                sshlog_fd.close()
+                return 'sshd was taking too long to respond'        
+            if ssh_proc.poll() != None:
+                os.kill(stcppipe_proc.pid, signal.SIGTERM)
+                sshlog_fd.close()   
+                is_ssh_session_active = False
+                return 'ssh exited abruptly'
+            continue
         sshlog_fd.write(cmd+'\n')
         sshlog_fd.flush()
         if cmd.startswith('Session finished. Please reconnect and use port '):
             newport = cmd[len('Session finished. Please reconnect and use port '):].split()[0]
             if len(newport) < 4 or len(newport)>5:
                 os.kill(stcppipe_proc.pid, signal.SIGTERM)
-                sshlog_fd.close()                
+                sshlog_fd.close()
+                is_ssh_session_active = False
                 return 'newport length error'
             os.kill(stcppipe_proc.pid, signal.SIGTERM)
             sshlog_fd.close()
             assigned_port = newport
+            is_ssh_session_active = False
             return 'reconnect'
         if cmd.startswith('Session finished.'): 
             os.kill(stcppipe_proc.pid, signal.SIGTERM)            
-            sshlog_fd.close()            
+            sshlog_fd.close()
+            is_ssh_session_active = False
             return 'session finished'
         if cmd.startswith('Tunnel ready'): 
             sshlog_fd.close()
@@ -729,31 +734,7 @@ def start_tunnel(privkey_file, oracle_address):
 
 
 
-if __name__ == "__main__":
-    #if len(sys.argv) != 11:
-        #print("\n")
-        #print ("10 arguments expected separated by a space in this sequence:")
-        #print ("GetUserURL, ListMetricsURL, DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutputURL")
-        #print ("oracle DNS, private key file, assigned port, account number, sum")
-        #print("\n")
-        #exit(1)
-    #GetUserURL = sys.argv[1]
-    #ListMetricsURL = sys.argv[2]
-    #DescribeInstancesURL= sys.argv[3]
-    #DescribeVolumesURL= sys.argv[4]
-    #GetConsoleOutputURL= sys.argv[5]
-    #oracle_address= sys.argv[6]
-    #privkey= sys.argv[7]
-    #assigned_port= sys.argv[8]
-   
-    #accno= sys.argv[9]
-    #sum_= sys.argv[10]
-    
-    #check_result = check_oracle_urls(GetUserURL, ListMetricsURL, DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutputURL, oracle_dns)
-    #if check_result != 'success':
-        #print ('Error checking oracle: '+check_result)
-        #exit(1)
-    
+if __name__ == "__main__": 
     #show small dialog. It will go away as soon as addon sends "started" signal to backend
     tkwindow = Tk()    
     w = Label(tkwindow, text="Paysty is initializing...")
@@ -769,38 +750,20 @@ if __name__ == "__main__":
     thread.start()
   
     ff_retval = start_firefox()
-    if ff_retval != 'success':
-        os.kill(stcppipe_proc.pid, signal.SIGTERM)
-        ssh_proc.stdin.write('exit\n')
+    if ff_retval[0] != 'success':
         print ('Error while starting Firefox: '+ff_retval, end='\r\n')
         exit(1)
+    ff_proc = ff_retval[1]    
     
     while True:
+        time.sleep(1)
         if (is_ff_started and not is_tk_destroyed):
             tkwindow.destroy()
             is_tk_destroyed = True
-        thread.join(1)
-        if not thread.isAlive():
+        if ff_proc.poll() != None:
+            #FF window was closed, shut down all subsystems and exit gracefully
+            request = urllib2.Request("http://127.0.0.1:" +str(FF_to_backend_port)+ "/terminate")
+            request.get_method = lambda : 'HEAD'            
+            urllib2.urlopen(request)
             break
-
-    #we get here when thread terminates    
-    
-    #commented out for ALPHA
-    #if thread.retval == 'failure':
-        #print ("Could not decrypt HTML locally", end='\r\n')
-        #ssh_proc.stdin.write('exit\n')
-        #exit(1)  
         
-    #elif thread.retval != 'success':
-        #print ("Internal error. Thread returned unknown value", end='\r\n')
-        #ssh_proc.stdin.write('exit\n')
-        #exit(1)
-    
-    #sslkey_fd = open(sslkey, 'r')
-    #key_data = sslkey_fd.read()
-    #sslkey_fd.close()
-    #ssh_proc.stdin.write('sslkey '+key_data+'\n')
-    #exit(0)
-    
-
-    

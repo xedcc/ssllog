@@ -1,6 +1,7 @@
 // var consoleService = Components.classes["@mozilla.org/consoleservice;1"].getService(Components.interfaces.nsIConsoleService);
 var prefs = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService)
 var port = Components.classes["@mozilla.org/process/environment;1"].getService(Components.interfaces.nsIEnvironment).get("FF_to_backend_port")
+Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.").setCharPref("start_new_session", "false")
 
 //Let the backend know that it can remove the splashscreen
 var reqStarted = new XMLHttpRequest();
@@ -35,27 +36,19 @@ function pageMarked(){
 	var textbox_accno = document.getElementById("textbox_accno");
 	var panel = document.getElementById("panel");
 	var label_accno = document.getElementById("label_accno");
+	var label_accno_white = document.getElementById("label_accno_white");
 	var label_sum = document.getElementById("label_sum");
+	var label_sum_white = document.getElementById("label_sum_white");
 	var info = document.getElementById("label_info");
-	var box = document.getElementById("box");
 	
 	button_green.hidden = true
 	button_grey1.hidden = false
 
 	if (!pressed_green_once) {
-		box.removeChild(label_accno)
-		var accno_white = document.createElement("label");
-		accno_white.setAttribute("value","Account number:");
-		accno_white.setAttribute("style", "color:white;")
-		box.insertBefore(accno_white, textbox_accno)	
-
-		box.removeChild(label_sum)
-		var sum_white = document.createElement("label");
-		sum_white.setAttribute("value","Sum:");
-		sum_white.setAttribute("style", "color:white;")
-		box.insertBefore(sum_white, textbox_sum)	
-
-
+		label_accno.hidden = true
+		label_accno_white.hidden = false
+		label_sum.hidden = true
+		label_sum_white.hidden = false
 		textbox_sum.disabled = true
 		textbox_accno.disabled = true
 		pressed_green_once=true
@@ -117,9 +110,11 @@ function responsePageMarked (iteration) {
 	}
 	else if (value == "failure") {
 		log("FAILURE finding HTML. Please let the developers know")
+		terminate()
 	}
 	else {
  		log("Internal Error. Unexpected value: "+value+". Please let the developers knows")
+ 		terminate()
 	}
 }
 
@@ -150,16 +145,20 @@ function responseCheckEscrowtrace (iteration) {
 	var value = reqCheckEscrowtrace.getResponseHeader("value");
 	if (query != "check_escrowtrace") {
 		log("Internal error. Wrong response header: "+ query)
+		terminate()
 	}
 	if (value == "success") {
 		log("SUCCESS finding HTML in escrow's data")
 		alert("Congratulations! Paysty can be used with your bank's website. You may now logout from your bank and close this Firefox window")
+		terminate()
 	}
 	else if (value == "failure") {
 		log("FAILURE finding HTML in escrow's data. Please let the developers know")
+		terminate()
 	}
 	else {
  		log("Internal Error. Unexpected value: "+value+". Please let the developers knows")
+ 		terminate()
 	}
 }
 
@@ -279,6 +278,50 @@ function log(string){
 }
 
 
+//Check if user wants to start a new banking session
+checkNewSession()
+function checkNewSession() {
+    var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
+    var value = branch.getCharPref("start_new_session")
+    if (value != "true"){
+        setTimeout(checkNewSession, 1000);
+        return
+    }
+   	var button_green = document.getElementById("button_green");
+	var button_grey1 = document.getElementById("button_grey1");
+	var textbox_sum = document.getElementById("textbox_sum");
+	var textbox_accno = document.getElementById("textbox_accno");
+	var label_accno = document.getElementById("label_accno");
+	var label_accno_white = document.getElementById("label_accno_white");
+	var label_sum = document.getElementById("label_sum");
+	var label_sum_white = document.getElementById("label_sum_white");
+	
+	button_green.hidden = true
+	button_grey1.hidden = false
+
+	label_accno.hidden = false
+	label_accno_white.hidden = true
+	label_sum.hidden = false
+	label_sum_white.hidden = true
+	textbox_sum.disabled = false
+	textbox_sum.value = ""
+	textbox_accno.disabled = false
+	textbox_accno.value = ""
+	pressed_green_once=false
+
+	is_accno_entered = false
+	is_sum_entered = false
+
+    branch.setCharPref("start_new_session", "false")
+    setTimeout(checkNewSession, 1000);
+}
+
+function terminate(){
+    reqTerminate = new XMLHttpRequest();
+    reqTerminate.open("HEAD", "http://127.0.0.1:"+port+"/terminate", true);
+    reqTerminate.send();    
+}
+
 //pin the addon tab on first run. It should remain pinned on subsequent runs
 setTimeout(function(){
 	var lspnr_prefs = Components.classes["@mozilla.org/preferences-service;1"]
@@ -293,4 +336,4 @@ setTimeout(function(){
 	gBrowser.pinTab(tab)
     gBrowser.removeCurrentTab()
 
-}, 2000)
+}, 1000)
