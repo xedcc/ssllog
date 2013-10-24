@@ -18,6 +18,7 @@ import time
 from Tkinter import *
 import urllib2
 from xml.dom import minidom
+import zipfile
 
 TESTING = True
 #ALPHA_TESTING means the users have to enter accno and sum themselves via FF addon
@@ -25,10 +26,11 @@ ALPHA_TESTING = True
 
 
 installdir = os.path.dirname(os.path.realpath(__file__))
+datadir = os.path.join(installdir, "data")
 logdir = os.path.join(installdir, 'stcppipelogs')
 sslkeylog = os.path.join(installdir, 'sslkeylog')
 sslkey = os.path.join(installdir, 'sslkey')
-stcppipe_exepath = os.path.join(installdir, 'oracle','stcppipe')
+stcppipe_exepath = os.path.join(datadir,'stcppipe', 'stcppipe')
 firefox_exepath = '/home/default2/Desktop/firefox-nightly/firefox'
 ssh_exepath = 'ssh'
 ssh_logfile = os.path.join(installdir, 'ssh.log')
@@ -505,11 +507,10 @@ def start_firefox():
     print ("Starting a new instance of Firefox with a new profile",end='\r\n')
     if not os.path.isdir(os.path.join(installdir, 'firefox')): os.mkdir(os.path.join(installdir, 'firefox'))
     try:
-        ff_proc = subprocess.Popen([firefox_exepath,'-new-instance', '-P', 'ssllog'], stdout=open(os.path.join(installdir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(installdir, 'firefox', "firefox.stderr"), 'w'))
+        ff_proc = subprocess.Popen([firefox_exepath,'--new-instance', '-P', 'ssllog'], stdout=open(os.path.join(installdir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(installdir, 'firefox', "firefox.stderr"), 'w'))
     except Exception,e:
         print ("Error starting Firefox", e,end='\r\n')
-        return ["Error starting Firefox"]
-    
+        return ["Error starting Firefox"]   
     return ['success', ff_proc]
 
 
@@ -744,6 +745,40 @@ if __name__ == "__main__":
     tkwindow.after(100, tkwindow.quit)    
     tkwindow.mainloop() 
     
+    if os.path.isfile(os.path.join(datadir, "firstrun")):
+        #check that ssh, tshark, gcc are installed
+        try:
+            subprocess.check_output(['which', 'ssh'])
+        except:
+            print ('Please make sure ssh is installed and in your PATH')
+            exit(1)
+        try:
+            subprocess.check_output(['which', 'gcc'])
+        except:
+            print ('Please make sure gcc is installed and in your PATH')
+            exit(1)    
+        try:
+            subprocess.check_output(['which', 'tshark'])
+        except:
+            print ('Please make sure tshark is installed and in your PATH')
+            exit(1)          
+
+        #on first run, check stcppipe.zip's hash and compile it
+        #stcppipe by Luigi Auriemma http://aluigi.altervista.org/mytoolz/stcppipe.zip v.0.4.8b
+        sp_fd = open(os.path.join(datadir,"stcppipe.zip"), 'r')
+        sp_bin = sp_fd.read()
+        sp_fd.close()
+        if (hashlib.sha256(sp_bin).hexdigest() != "3fe9e52633d923733841f7d20d1c447f0ec2e85557f68bac3f25ec2824b724e8"):
+            exit(1)
+        zfile = zipfile.ZipFile(os.path.join(datadir, "stcppipe.zip"))
+        zfile.extractall(os.path.join(datadir, "stcppipe"))      
+        try:
+            subprocess.check_output(['gcc', '-o', 'stcppipe', 'stcppipe.c', '-DDISABLE_SSL', '-DACPDUMP_LOCK', '-lpthread'], cwd=os.path.join(datadir, "stcppipe"))
+        except:
+            print ('Error compiling stcppipe. Please let the developers know')
+            exit(1)            
+        os.remove(os.path.join(datadir, "firstrun"))
+         
     FF_to_backend_port = random.randint(1025,65535)
     FF_proxy_port = random.randint(1025,65535)
 
