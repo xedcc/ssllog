@@ -36,6 +36,8 @@ class HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
     
 TESTING = False
 if sys.argv[1] == 'testing' if len(sys.argv)>1 else False: TESTING = True
+#for ALPHA testing the user may perform unlimited number of sessions
+ALPHA_TESTING = True
 
 database = []
 #database fields
@@ -214,16 +216,17 @@ def thread_handle_txid(conn, txid, sshd_ppid):
     #Copy the vars which we'll need later, so we don't have to lock db again later
     port = database[index]['port']
     __UNLOCK_DB()
- 
-    if finished_banking:
-        #if the user has finished the banking session, it is assumed that he logs in to audit the database
-        db_str = get_database_as_a_string(txid)
-        print 'Database sent to user'
-        conn.send('database ' + db_str)
-        #allow stub to process socket data before sending the "finished" message
-        time.sleep(3)
-        cleanup_and_exit(conn, msg='Sent database to user', txid=txid)
-        return
+    
+    if not ALPHA_TESTING:
+        if finished_banking:
+            #if the user has finished the banking session, it is assumed that he logs in to audit the database
+            db_str = get_database_as_a_string(txid)
+            print 'Database sent to user'
+            conn.send('database ' + db_str)
+            #allow stub to process socket data before sending the "finished" message
+            time.sleep(3)
+            cleanup_and_exit(conn, msg='Sent database to user', txid=txid)
+            return
     
     #setup to perform banking audit  
     if not os.path.isdir(stcppipe_logdir): os.mkdir(stcppipe_logdir)
@@ -299,7 +302,6 @@ def thread_handle_txid(conn, txid, sshd_ppid):
         #Anti DOS measure. Every minute make sure the user is not overwhelming the logdir with data or new files(generated on every new connection). Limits: 1000 files or 50MB of data
         if current_time-last_dos_check > 60:
             last_dos_check = current_time
-            #ALPHA only: make sure logdir still exists. It might have been deleted and we are still waiting on exit success/failure
             if os.path.isdir(logdir):
                 filelist = os.listdir(logdir)
                 if len(filelist) > 1000 or sum([os.path.getsize(os.path.join(logdir,f)) for f in filelist]) > 50000000:
@@ -315,15 +317,15 @@ def thread_handle_txid(conn, txid, sshd_ppid):
                 os.kill(stcppipe_proc.pid, signal.SIGTERM)
                 time.sleep(3)
                 
-                #commented out for ALPHA only
-                #sslkey = msg_in[len(txid+'-cmd sslkey '):]
-                #if len(sslkey) > 180:
-                    #shutil.rmtree(logdir)
-                    #cleanup_and_exit(conn, msg='Wrong sslkey length', txid=txid)
-                    #return                       
-                #sslkey_fd = open(os.path.join(logdir,'sslkey'), 'w')
-                #sslkey_fd.write(sslkey+'\n')
-                #sslkey_fd.close()
+                if not ALPHA_TESTING:
+                    sslkey = msg_in[len(txid+'-cmd sslkey '):]
+                    if len(sslkey) > 180:
+                        shutil.rmtree(logdir)
+                        cleanup_and_exit(conn, msg='Wrong sslkey length', txid=txid)
+                        return                       
+                    sslkey_fd = open(os.path.join(logdir,'sslkey'), 'w')
+                    sslkey_fd.write(sslkey+'\n')
+                    sslkey_fd.close()
                 
                 finish_time = int(time.time())                
                 tar_path = os.path.join(stcppipe_logdir, txid+'.tar')
@@ -343,61 +345,62 @@ def thread_handle_txid(conn, txid, sshd_ppid):
                 database[index]['hash'] = sha_hash
                 __UNLOCK_DB()
                 
-                #ALPHA ONLY: expect the user to request the tarball
-                #setup a mini http server and listen for GET requests
-                print ('Starting mini http server')
-                try:
-                    httpd = StoppableHttpServer(('127.0.0.1', port), HandlerClass)
-                    httpd.arg_in = txid
-                except Exception, e:
-                    print ('Error starting mini http server')
-                    os.remove(os.path.join(stcppipe_logdir, txid+'.tar'))                    
-                    cleanup_and_exit(conn, msg='Error starting mini http server', txid=txid)
-                    return()
-                starttime = time.time()
-                while not httpd.stop:
-                        httpd.handle_request()
-                        #we get here when timeout=1 triggers
-                        if time.time() - starttime > 120:
-                            print ('Tarball not requested in 2 mins')
-                            os.remove(os.path.join(stcppipe_logdir, txid+'.tar'))                            
-                            cleanup_and_exit(conn, msg='Tarball not requested in 2 mins', txid=txid)
-                            return()
-                #now wait for user to send exit success or exit failure
-                continue
+                if ALPHA_TESTING:
+                    #ALPHA ONLY: expect the user to request the tarball
+                    #setup a mini http server and listen for GET requests
+                    print ('Starting mini http server')
+                    try:
+                        httpd = StoppableHttpServer(('127.0.0.1', port), HandlerClass)
+                        httpd.arg_in = txid
+                    except Exception, e:
+                        print ('Error starting mini http server')
+                        os.remove(os.path.join(stcppipe_logdir, txid+'.tar'))                    
+                        cleanup_and_exit(conn, msg='Error starting mini http server', txid=txid)
+                        return
+                    starttime = time.time()
+                    while not httpd.stop:
+                            httpd.handle_request()
+                            #we get here when timeout=1 triggers
+                            if time.time() - starttime > 120:
+                                print ('Tarball not requested in 2 mins')
+                                os.remove(os.path.join(stcppipe_logdir, txid+'.tar'))                            
+                                cleanup_and_exit(conn, msg='Tarball not requested in 2 mins', txid=txid)
+                                return
+                    #now wait for user to send exit success or exit failure
+                    continue
                         
                 
-                #cleanup_and_exit(conn, msg='Session ended successfully ', txid=txid)
-                #return
+                cleanup_and_exit(conn, msg='Session ended successfully ', txid=txid)
+                return
             
-            #commented out for ALPHA only
-            #if msg_in == txid+'-cmd exit':
-                #os.kill(stcppipe_proc.pid, signal.SIGTERM)
-                #time.sleep(3)
-                #shutil.rmtree(logdir)
-                #cleanup_and_exit(conn, msg='User initiated shutdown', txid=txid)
-                #return
+            if not ALPHA_TESTING:
+                if msg_in == txid+'-cmd exit':
+                    os.kill(stcppipe_proc.pid, signal.SIGTERM)
+                    time.sleep(3)
+                    shutil.rmtree(logdir)
+                    cleanup_and_exit(conn, msg='User initiated shutdown', txid=txid)
+                    return
             
-            #for ALPHA only
-            if msg_in.startswith(txid+'-cmd exit'):
-                result = None
-                result_in_list = msg_in[len(txid+'-cmd exit'):].split()
-                if len(result_in_list) == 0:
-                    #user just sent "exit"
-                    os.kill(stcppipe_proc.pid, signal.SIGTERM)                    
-                    if os.path.isdir(logdir): shutil.rmtree(logdir)                    
-                    cleanup_and_exit(conn, msg='User terminated abruptly', txid=txid)
-                    return  
-                else:
-                    result = result_in_list[0]
-                dbresult = 1 if (result == 'success') else -1
-                __LOCK_DB
-                index = get_txid_index_in_db(txid, lock=False)
-                database[index]['escrow_fetched_tarball'] = dbresult
-                __UNLOCK_DB
-                
-                cleanup_and_exit(conn, msg='User initiated shutdown', txid=txid)
-                return                
+            if ALPHA_TESTING:
+                if msg_in.startswith(txid+'-cmd exit'):
+                    result = None
+                    result_in_list = msg_in[len(txid+'-cmd exit'):].split()
+                    if len(result_in_list) == 0:
+                        #user just sent "exit"
+                        os.kill(stcppipe_proc.pid, signal.SIGTERM)                    
+                        if os.path.isdir(logdir): shutil.rmtree(logdir)                    
+                        cleanup_and_exit(conn, msg='User terminated abruptly', txid=txid)
+                        return  
+                    else:
+                        result = result_in_list[0]
+                    dbresult = 1 if (result == 'success') else -1
+                    __LOCK_DB
+                    index = get_txid_index_in_db(txid, lock=False)
+                    database[index]['escrow_fetched_tarball'] = dbresult
+                    __UNLOCK_DB
+                    
+                    cleanup_and_exit(conn, msg='User initiated shutdown', txid=txid)
+                    return                
                 
                 
             else:
@@ -432,7 +435,7 @@ def escrow_thread(conn, sshd_ppid):
     
     while 1:
         #escrow isn't allowed to make more than one request per minute. Anti DOS measure.
-        if TESTING: time.sleep(1)
+        if TESTING or ALPHA_TESTING: time.sleep(1)
         else: time.sleep(60)
         try:
             args = conn.recv(1024)
