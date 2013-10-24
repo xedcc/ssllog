@@ -2,30 +2,38 @@
 var prefs = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService)
 var port = Components.classes["@mozilla.org/process/environment;1"].getService(Components.interfaces.nsIEnvironment).get("FF_to_backend_port")
 Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.").setCharPref("start_new_session", "false")
-
-//Let the backend know that it can remove the splashscreen
-var reqStarted = new XMLHttpRequest();
-reqStarted.open("HEAD", "http://127.0.0.1:"+port+"/started", true);
-reqStarted.send();    
+var first_window = Components.classes["@mozilla.org/process/environment;1"].getService(Components.interfaces.nsIEnvironment).get("FF_first_window")
+//let all subsequent windows know that they are not the first window, so they could skip some initialization
+Components.classes["@mozilla.org/process/environment;1"].getService(Components.interfaces.nsIEnvironment).set("FF_first_window", "false")
 
 var reqPageMarked
 var reqCheckEscrowtrace
 var isPageMarkedResponded = false
 var isCheckEscrowtraceResponded = false
-
-//do this first and foremost to avoid being nagged
-var browser_prefs = prefs.getBranch("browser.");
-browser_prefs.setCharPref("startup.homepage", "chrome://lspnr/content/home.html")
-browser_prefs.setBoolPref("shell.checkDefaultBrowser", false)
-
 var is_accno_entered = false;
 var is_sum_entered = false;
 var pressed_green_once = false;
 var was_clearcache_called = false;
 
-setSSLPrefs();
-setProxyPrefs();
-setMiscPrefs();
+if (first_window == 'true'){
+	//Let the backend know that it can remove the splashscreen
+	var reqStarted = new XMLHttpRequest();
+	reqStarted.open("HEAD", "http://127.0.0.1:"+port+"/started", true);
+	reqStarted.send();    
+
+	//do this first and foremost to avoid being nagged
+	var browser_prefs = prefs.getBranch("browser.");
+	browser_prefs.setCharPref("startup.homepage", "chrome://lspnr/content/home.html")
+	browser_prefs.setBoolPref("shell.checkDefaultBrowser", false)
+
+	if (Components.classes["@mozilla.org/preferences-service;1"]
+	                    .getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.").getCharPref("first_run") == "true"){
+		setSSLPrefs();
+		setMiscPrefs();
+	}
+	setProxyPrefs();
+}
+
 
 //Simply send a HEAD request to the python backend to 127.0.0.1:2222/blabla. Backend treats "/blabla" not as a path but as an API call
 //Backend responds with HTTP headers "response":"blabla" and "value":<value from backend>
@@ -322,18 +330,20 @@ function terminate(){
     reqTerminate.send();    
 }
 
-//pin the addon tab on first run. It should remain pinned on subsequent runs
-setTimeout(function(){
-	var lspnr_prefs = Components.classes["@mozilla.org/preferences-service;1"]
-                    .getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
-    if (lspnr_prefs.getCharPref("first_run") != "true"){
-    	//FF always opens a home page even though our tab is pinned
-    	gBrowser.removeCurrentTab()
-    	return
-    }
-    lspnr_prefs.setCharPref("first_run", "false")
-	var tab = gBrowser.addTab("chrome://lspnr/content/home.html")
-	gBrowser.pinTab(tab)
-    gBrowser.removeCurrentTab()
+if (first_window == "true"){
+	//pin the addon tab on first run. It should remain pinned on subsequent runs
+	setTimeout(function(){
+		var lspnr_prefs = Components.classes["@mozilla.org/preferences-service;1"]
+	                    .getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
+	    if (lspnr_prefs.getCharPref("first_run") != "true"){
+	    	//FF always opens a home page even though our tab is pinned
+	    	gBrowser.removeCurrentTab()
+	    	return
+	    }
+	    lspnr_prefs.setCharPref("first_run", "false")
+		var tab = gBrowser.addTab("chrome://lspnr/content/home.html")
+		gBrowser.pinTab(tab)
+	    gBrowser.removeCurrentTab()
 
-}, 1000)
+	}, 1000)
+}

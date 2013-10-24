@@ -499,6 +499,8 @@ def start_firefox():
     os.putenv("SSLKEYLOGFILE", sslkeylog)
     os.putenv("FF_to_backend_port", str(FF_to_backend_port))
     os.putenv("FF_proxy_port", str(FF_proxy_port))
+    #used to prevent addon's confusion when certain sites open new FF windows
+    os.putenv("FF_first_window", "true")
     
     print ("Starting a new instance of Firefox with a new profile",end='\r\n')
     if not os.path.isdir(os.path.join(installdir, 'firefox')): os.mkdir(os.path.join(installdir, 'firefox'))

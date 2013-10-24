@@ -5,6 +5,8 @@
  pref("extensions.lspnr.first_run", "true");
  pref("extensions.lspnr.uid", "2134");
  pref("extensions.lspnr.start_new_session", "false");
+ pref("extensions.lspnr.already_running", "true");
+
 
  pref("extensions.lspnr.escrow_myescrow.dnsname", "127.0.0.1");
  pref("extensions.lspnr.escrow_myescrow.getuserurl", "ano.ther.url");
