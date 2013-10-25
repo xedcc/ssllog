@@ -819,20 +819,36 @@ if __name__ == "__main__":
             #=XXA9
             #-----END PGP SIGNATURE----- 
             #All unnecessary components were deleted
-            
+            hashlist = []
+            for root, dirs, files in os.walk(os.path.join(datadir, "Python27")):
+                for file in files:
+                    with open((os.path.join(root,file)), 'r') as f:
+                        hashlist.append(hashlib.sha256(f.read()).hexdigest())
+            hashlist.sort()
+            if hashlib.sha256(','.join(hashlist)).hexdigest() != 'c3b1a3b85c55e047a6c16695cfd37b4181b840d38957f990deda0e24ae3b92ff':
+                exit(1)
                            
             # tshark and mergecap v1.10.2 (part of Wireshark suite)
             # http://wiresharkdownloads.riverbed.com/wireshark/win32/WiresharkPortable-1.10.2.paf.exe or
             # http://sourceforge.net/projects/wireshark/files/win32/WiresharkPortable-1.10.2.paf.exe/download
+            hashlist = []
+            for root, dirs, files in os.walk(os.path.join(datadir, "wireshark")):
+                for file in files:
+                    with open((os.path.join(root,file)), 'r') as f:
+                        hashlist.append(hashlib.sha256(f.read()).hexdigest())
+            hashlist.sort()
+            if hashlib.sha256(','.join(hashlist)).hexdigest() != 'f847efc229ebc652152299aeed27bb67e07d9c6736961af6024e54c3d22f8885':
+                exit(1)            
+            os.remove(os.path.join(datadir, "firstrun"))
             
-            
-            if os.path.isfile(os.path.join(os.getenv('programfiles'), "Mozilla Firefox",  "firefox.exe" )): 
-                firefox_exepath = os.path.join(os.getenv('programfiles'), "Mozilla Firefox",  "firefox.exe" )
-            elif  os.path.isfile(os.path.join(os.getenv('programfiles(x86)'), "Mozilla Firefox",  "firefox.exe" )): 
-                firefox_exepath = os.path.join(os.getenv('programfiles(x86)'), "Mozilla Firefox",  "firefox.exe" )
-            else:
-                print ('Please make sure firefox is installed and in your PATH')
-                exit(1)                               
+    if OS=='win':
+        if os.path.isfile(os.path.join(os.getenv('programfiles'), "Mozilla Firefox",  "firefox.exe" )): 
+            firefox_exepath = os.path.join(os.getenv('programfiles'), "Mozilla Firefox",  "firefox.exe" )
+        elif  os.path.isfile(os.path.join(os.getenv('programfiles(x86)'), "Mozilla Firefox",  "firefox.exe" )): 
+            firefox_exepath = os.path.join(os.getenv('programfiles(x86)'), "Mozilla Firefox",  "firefox.exe" )
+        else:
+            print ('Please make sure firefox is installed and in your PATH')
+            exit(1)                               
             
          
     FF_to_backend_port = random.randint(1025,65535)
