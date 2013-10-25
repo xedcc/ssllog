@@ -30,13 +30,13 @@ if platform == 'Windows': OS = 'win'
 
 installdir = os.path.dirname(os.path.realpath(__file__))
 datadir = os.path.join(installdir, "data")
-logdir = os.path.join(installdir, 'stcppipelogs')
-sslkeylog = os.path.join(installdir, 'sslkeylog')
-sslkey = os.path.join(installdir, 'sslkey')
+logdir = os.path.join(datadir, 'stcppipelogs')
+sslkeylog = os.path.join(datadir, 'sslkeylog')
+sslkey = os.path.join(datadir, 'sslkey')
 stcppipe_exepath = os.path.join(datadir,'stcppipe', 'stcppipe')
 firefox_exepath = '/home/default2/Desktop/firefox-nightly/firefox'
 ssh_exepath = 'ssh'
-ssh_logfile = os.path.join(installdir, 'ssh.log')
+ssh_logfile = os.path.join(datadir, 'ssh.log')
 #ssh_exepath = os.path.join(installdir, 'putty')
 random_ssh_port = 0
 #random TCP port on which firefox extension communicates with python backend
@@ -479,7 +479,7 @@ def start_firefox():
         
         #write the path into the file
         try:
-            mfile.write(os.path.join(installdir,"FF-addon"))
+            mfile.write(os.path.join(datadir,"FF-addon"))
         except Exception,e:
             print ('File write error', e,end='\r\n')
             return ['File write error']
@@ -491,7 +491,7 @@ def start_firefox():
         except Exception,e:
             print ('File open error', e,end='\r\n')
             return ['File open error'] 
-        mfile.write("[ExtensionDirs]\nExtension0=" + os.path.join(installdir,"FF-addon") + "\n")
+        mfile.write("[ExtensionDirs]\nExtension0=" + os.path.join(datadir, "FF-addon") + "\n")
         mfile.close()
         
         #force displaying of add-on toolbar
@@ -515,9 +515,9 @@ def start_firefox():
     
     print ("Starting a new instance of Firefox with a new profile",end='\r\n')
     print ("Starting a new instance of Firefox with a new profile",end='\r\n')
-    if not os.path.isdir(os.path.join(installdir, 'firefox')): os.mkdir(os.path.join(installdir, 'firefox'))
+    if not os.path.isdir(os.path.join(datadir, 'firefox')): os.mkdir(os.path.join(datadir, 'firefox'))
     try:
-        ff_proc = subprocess.Popen([firefox_exepath,'-no-remote', '-P', 'ssllog'], stdout=open(os.path.join(installdir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(installdir, 'firefox', "firefox.stderr"), 'w'))
+        ff_proc = subprocess.Popen([firefox_exepath,'-no-remote', '-P', 'ssllog'], stdout=open(os.path.join(datadir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(datadir, 'firefox', "firefox.stderr"), 'w'))
     except Exception,e:
         print ("Error starting Firefox", e,end='\r\n')
         return ["Error starting Firefox"]   
@@ -752,7 +752,7 @@ if __name__ == "__main__":
    
     if os.path.isfile(os.path.join(datadir, "firstrun")):
         if OS=='linux':
-            #check that ssh, tshark, gcc are installed
+            #check that ssh, gcc, tshark, and firefox are installed
             try:
                 subprocess.check_output(['which', 'ssh'])
             except:
@@ -789,10 +789,18 @@ if __name__ == "__main__":
                 print ('Error compiling stcppipe. Please let the developers know')
                 exit(1)            
             os.remove(os.path.join(datadir, "firstrun"))
+            
         if OS=='win':
             #check hash and unzip stcppipe
-            #check hashes of plink & of tshark mergecap and its dlls
-            
+            #stcppipe by Luigi Auriemma http://aluigi.altervista.org/mytoolz/stcppipe.zip v.0.4.8b
+            sp_fd = open(os.path.join(datadir,"stcppipe.zip"), 'r')
+            sp_bin = sp_fd.read()
+            sp_fd.close()
+            if (hashlib.sha256(sp_bin).hexdigest() != "33713607560a2e04205ed16de332792abbf26672226afb87651008d4366ae54a"):
+                exit(1)
+            zfile = zipfile.ZipFile(os.path.join(datadir, "stcppipe.zip"))
+            zfile.extractall(os.path.join(datadir, "stcppipe"))
+                        
             #plink v0.63.0.0 (part of Putty suite) http://www.chiark.greenend.org.uk/~sgtatham/putty/download.html
             pl_fd = open(os.path.join(datadir,"plink.exe"), 'r')
             pl_bin = pl_fd.read()
@@ -800,7 +808,24 @@ if __name__ == "__main__":
             if (hashlib.sha256(pl_bin).hexdigest() != "938367a69b9a0c90ae136e4740a56e3ac16d008f26f13c18a4fd59c999e1e453"):
                 exit(1)
                 
-            #tshark and mergecap v1.10.1.50926 (part of Wireshark suite)
+            #python 2.7 
+            # http://www.python.org/ftp/python/2.7.5/python-2.7.5.msi
+            # signature for this file from python.org
+            #-----BEGIN PGP SIGNATURE-----
+            #Version: GnuPG v2.0.14 (MingW32)
+            
+            #iEYEABECAAYFAlGT9rUACgkQavBT8H2dyNLtLACZARE3lxDyOn378PmwN/bpB4VM
+            #E8IAn0D2+4M2cp1bI3f7YL/BdiBQZNFk
+            #=XXA9
+            #-----END PGP SIGNATURE----- 
+            #All unnecessary components were deleted
+            
+                           
+            # tshark and mergecap v1.10.2 (part of Wireshark suite)
+            # http://wiresharkdownloads.riverbed.com/wireshark/win32/WiresharkPortable-1.10.2.paf.exe or
+            # http://sourceforge.net/projects/wireshark/files/win32/WiresharkPortable-1.10.2.paf.exe/download
+            
+            
             if os.path.isfile(os.path.join(os.getenv('programfiles'), "Mozilla Firefox",  "firefox.exe" )): 
                 firefox_exepath = os.path.join(os.getenv('programfiles'), "Mozilla Firefox",  "firefox.exe" )
             elif  os.path.isfile(os.path.join(os.getenv('programfiles(x86)'), "Mozilla Firefox",  "firefox.exe" )): 
