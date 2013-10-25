@@ -5,6 +5,7 @@ import base64
 import BaseHTTPServer
 import hashlib
 import os
+import platform
 import random
 import re
 import shutil
@@ -15,7 +16,6 @@ import sys
 import tarfile
 import threading
 import time
-from Tkinter import *
 import urllib2
 from xml.dom import minidom
 import zipfile
@@ -24,6 +24,9 @@ TESTING = True
 #ALPHA_TESTING means the users have to enter accno and sum themselves via FF addon
 ALPHA_TESTING = True
 
+platform = platform.system()
+OS = None
+if platform == 'Windows': OS = 'win'
 
 installdir = os.path.dirname(os.path.realpath(__file__))
 datadir = os.path.join(installdir, "data")
@@ -51,7 +54,7 @@ assigned_port = None
 username = "default2"
 is_ff_started = False
 is_tk_destroyed = False
-is_ssh_session_active = True
+is_ssh_session_active = False
 
 #a thread which returns a value. This is achieved by passing self as the first argument to a called function
 #the calling function can then set self.retval
@@ -426,7 +429,8 @@ def buyer_start_minihttp_thread(parentthread):
 
 
 def start_firefox():
-    global FF_to_backend_port    
+    global FF_to_backend_port 
+    global OS
     #we could ask user to run Firefox with -ProfileManager and create a new profile themselves
     #but to be as user-friendly as possible, we add a new Firefox profile behind the scenes
     
@@ -435,31 +439,36 @@ def start_firefox():
         print ("Couldn't find user's home directory",end='\r\n')
         return ["Couldn't find user's home directory"]
     #todo allow user to specify firefox profile dir manually 
-    ff_user_dir = os.path.join(homedir, ".mozilla", "firefox")   
+    if OS=='win':
+        ff_profile_root = os.path.join(os.getenv('APPDATA'), "Mozilla", "Firefox", "Profiles")
+        inifile = os.path.join(os.getenv('APPDATA'), "Mozilla", "Firefox", "profiles.ini")
+    elif OS=='linux':
+        ff_profile_root = os.path.join(homedir, ".mozilla", "firefox")
+        inifile = os.path.join(ff_profile_root, "profiles.ini")
     # skip this step if "ssllog" profile already exists
-    if (not os.path.isdir(os.path.join(ff_user_dir, "ssllog_profile"))):
-        os.mkdir(os.path.join(ff_user_dir, 'ssllog_profile'))        
+    if (not os.path.isdir(os.path.join(ff_profile_root, "ssllog_profile"))):
+        os.mkdir(os.path.join(ff_profile_root, 'ssllog_profile'))        
         print ("Tweaking our profile's directory",end='\r\n')
        
         try:
-            inifile = open(os.path.join(ff_user_dir, "profiles.ini"), "r+")
+            inifile_fd = open(inifile, "r+")
         except Exception,e: 
             print ('Could not open profiles.ini. Make sure it exists and you have sufficient read/write permissions',e,end='\r\n')
             return ['Could not open profiles.ini']
-        text = inifile.read()
+        text = inifile_fd.read()
    
         #get the last profile number and increase it by 1 for our profile
-        our_profile_number = int(text[text.rfind("[Profile")+len("[Profile"):].split("]")[0]) +1
+        our_profile_number = int( text[ text.rfind("[Profile")+len("[Profile"): ].split("]")[0] ) +1
     
         try:
-            inifile.seek(0, os.SEEK_END)
-            inifile.write('[Profile' +str(our_profile_number) + ']\nName=ssllog\nIsRelative=1\nPath=ssllog_profile\n\n')
+            inifile_fd.seek(0, os.SEEK_END)
+            inifile_fd.write('[Profile' +str(our_profile_number) + ']\nName=ssllog\nIsRelative=1\nPath='+("Profiles/" if OS=='win' else "") +'ssllog_profile\n\n')
         except Exception,e:
             print ('Could not write to profiles.ini. Make sure you have sufficient write permissions',e,end='\r\n')
             return ['Could not write to profiles.ini']
-        inifile.close()
+        inifile_fd.close()
     
-        ff_extensions_dir = os.path.join(ff_user_dir, "ssllog_profile", "extensions")
+        ff_extensions_dir = os.path.join(ff_profile_root, "ssllog_profile", "extensions")
         os.mkdir(ff_extensions_dir)        
         #extension dir contains a file with a path the the addon files in our installdir
         try:
@@ -478,7 +487,7 @@ def start_firefox():
         
         #prevent FF from prompting the user to install extenxion
         try:
-            mfile = open (os.path.join(ff_user_dir, 'ssllog_profile', 'extensions.ini'), "w")
+            mfile = open (os.path.join(ff_profile_root, 'ssllog_profile', 'extensions.ini'), "w")
         except Exception,e:
             print ('File open error', e,end='\r\n')
             return ['File open error'] 
@@ -487,7 +496,7 @@ def start_firefox():
         
         #force displaying of add-on toolbar
         try:
-            mfile = open (os.path.join(ff_user_dir, 'ssllog_profile', 'localstore.rdf'), "w+")
+            mfile = open (os.path.join(ff_profile_root, 'ssllog_profile', 'localstore.rdf'), "w+")
         except Exception,e:
             print ('File open error', e,end='\r\n')
             return ['File open error'] 
@@ -505,9 +514,10 @@ def start_firefox():
     os.putenv("FF_first_window", "true")
     
     print ("Starting a new instance of Firefox with a new profile",end='\r\n')
+    print ("Starting a new instance of Firefox with a new profile",end='\r\n')
     if not os.path.isdir(os.path.join(installdir, 'firefox')): os.mkdir(os.path.join(installdir, 'firefox'))
     try:
-        ff_proc = subprocess.Popen([firefox_exepath,'--new-instance', '-P', 'ssllog'], stdout=open(os.path.join(installdir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(installdir, 'firefox', "firefox.stderr"), 'w'))
+        ff_proc = subprocess.Popen([firefox_exepath,'-no-remote', '-P', 'ssllog'], stdout=open(os.path.join(installdir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(installdir, 'firefox', "firefox.stderr"), 'w'))
     except Exception,e:
         print ("Error starting Firefox", e,end='\r\n')
         return ["Error starting Firefox"]   
@@ -739,45 +749,66 @@ def start_tunnel(privkey_file, oracle_address):
 
 if __name__ == "__main__": 
     #show small dialog. It will go away as soon as addon sends "started" signal to backend
-    tkwindow = Tk()    
-    w = Label(tkwindow, text="Paysty is initializing...")
-    w.pack()
-    tkwindow.after(100, tkwindow.quit)    
-    tkwindow.mainloop() 
-    
+   
     if os.path.isfile(os.path.join(datadir, "firstrun")):
-        #check that ssh, tshark, gcc are installed
-        try:
-            subprocess.check_output(['which', 'ssh'])
-        except:
-            print ('Please make sure ssh is installed and in your PATH')
-            exit(1)
-        try:
-            subprocess.check_output(['which', 'gcc'])
-        except:
-            print ('Please make sure gcc is installed and in your PATH')
-            exit(1)    
-        try:
-            subprocess.check_output(['which', 'tshark'])
-        except:
-            print ('Please make sure tshark is installed and in your PATH')
-            exit(1)          
-
-        #on first run, check stcppipe.zip's hash and compile it
-        #stcppipe by Luigi Auriemma http://aluigi.altervista.org/mytoolz/stcppipe.zip v.0.4.8b
-        sp_fd = open(os.path.join(datadir,"stcppipe.zip"), 'r')
-        sp_bin = sp_fd.read()
-        sp_fd.close()
-        if (hashlib.sha256(sp_bin).hexdigest() != "3fe9e52633d923733841f7d20d1c447f0ec2e85557f68bac3f25ec2824b724e8"):
-            exit(1)
-        zfile = zipfile.ZipFile(os.path.join(datadir, "stcppipe.zip"))
-        zfile.extractall(os.path.join(datadir, "stcppipe"))      
-        try:
-            subprocess.check_output(['gcc', '-o', 'stcppipe', 'stcppipe.c', '-DDISABLE_SSL', '-DACPDUMP_LOCK', '-lpthread'], cwd=os.path.join(datadir, "stcppipe"))
-        except:
-            print ('Error compiling stcppipe. Please let the developers know')
-            exit(1)            
-        os.remove(os.path.join(datadir, "firstrun"))
+        if OS=='linux':
+            #check that ssh, tshark, gcc are installed
+            try:
+                subprocess.check_output(['which', 'ssh'])
+            except:
+                print ('Please make sure ssh is installed and in your PATH')
+                exit(1)
+            try:
+                subprocess.check_output(['which', 'gcc'])
+            except:
+                print ('Please make sure gcc is installed and in your PATH')
+                exit(1)    
+            try:
+                subprocess.check_output(['which', 'tshark'])
+            except:
+                print ('Please make sure tshark is installed and in your PATH')
+                exit(1)
+            try:
+                subprocess.check_output(['which', 'firefox'])
+            except:
+                print ('Please make sure firefox is installed and in your PATH')
+                exit(1)               
+    
+            #on first run, check stcppipe.zip's hash and compile it
+            #stcppipe by Luigi Auriemma http://aluigi.altervista.org/mytoolz/stcppipe.zip v.0.4.8b
+            sp_fd = open(os.path.join(datadir,"stcppipe.zip"), 'r')
+            sp_bin = sp_fd.read()
+            sp_fd.close()
+            if (hashlib.sha256(sp_bin).hexdigest() != "3fe9e52633d923733841f7d20d1c447f0ec2e85557f68bac3f25ec2824b724e8"):
+                exit(1)
+            zfile = zipfile.ZipFile(os.path.join(datadir, "stcppipe.zip"))
+            zfile.extractall(os.path.join(datadir, "stcppipe"))      
+            try:
+                subprocess.check_output(['gcc', '-o', 'stcppipe', 'stcppipe.c', '-DDISABLE_SSL', '-DACPDUMP_LOCK', '-lpthread'], cwd=os.path.join(datadir, "stcppipe"))
+            except:
+                print ('Error compiling stcppipe. Please let the developers know')
+                exit(1)            
+            os.remove(os.path.join(datadir, "firstrun"))
+        if OS=='win':
+            #check hash and unzip stcppipe
+            #check hashes of plink & of tshark mergecap and its dlls
+            
+            #plink v0.63.0.0 (part of Putty suite) http://www.chiark.greenend.org.uk/~sgtatham/putty/download.html
+            pl_fd = open(os.path.join(datadir,"plink.exe"), 'r')
+            pl_bin = pl_fd.read()
+            pl_fd.close()
+            if (hashlib.sha256(pl_bin).hexdigest() != "938367a69b9a0c90ae136e4740a56e3ac16d008f26f13c18a4fd59c999e1e453"):
+                exit(1)
+                
+            #tshark and mergecap v1.10.1.50926 (part of Wireshark suite)
+            if os.path.isfile(os.path.join(os.getenv('programfiles'), "Mozilla Firefox",  "firefox.exe" )): 
+                firefox_exepath = os.path.join(os.getenv('programfiles'), "Mozilla Firefox",  "firefox.exe" )
+            elif  os.path.isfile(os.path.join(os.getenv('programfiles(x86)'), "Mozilla Firefox",  "firefox.exe" )): 
+                firefox_exepath = os.path.join(os.getenv('programfiles(x86)'), "Mozilla Firefox",  "firefox.exe" )
+            else:
+                print ('Please make sure firefox is installed and in your PATH')
+                exit(1)                               
+            
          
     FF_to_backend_port = random.randint(1025,65535)
     FF_proxy_port = random.randint(1025,65535)
@@ -795,7 +826,6 @@ if __name__ == "__main__":
     while True:
         time.sleep(1)
         if (is_ff_started and not is_tk_destroyed):
-            tkwindow.destroy()
             is_tk_destroyed = True
         if ff_proc.poll() != None:
             #FF window was closed, shut down all subsystems and exit gracefully
