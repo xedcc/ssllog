@@ -1,5 +1,6 @@
 import BaseHTTPServer
 import fcntl
+import hashlib
 import os
 import random
 import shutil
@@ -644,6 +645,15 @@ def ban_user(txid):
                 
 
 if __name__ == "__main__":
+    
+    #on first run, check stcppipe.zip's hash and compile it
+    #stcppipe by Luigi Auriemma http://aluigi.altervista.org/mytoolz/stcppipe.zip v.0.4.8b
+    sp_fd = open(os.path.join(installdir,"stcppipe.zip"), 'r')
+    sp_bin = sp_fd.read()
+    sp_fd.close()
+    if (hashlib.sha256(sp_bin).hexdigest() != "3fe9e52633d923733841f7d20d1c447f0ec2e85557f68bac3f25ec2824b724e8"):
+        print ('Wrong stcppipe.zip hash')
+        exit(1)    
     
     oracle_socket = os.path.join(installdir, 'oracle-socket')
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
