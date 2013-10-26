@@ -50,8 +50,7 @@ sum_ = None
 stcppipe_proc = ssh_proc = None
 html_hash = None
 assigned_port = None
-#username = "ubuntu"
-username = "default2"
+username = "ubuntu"
 is_ff_started = False
 is_tk_destroyed = False
 is_ssh_session_active = False

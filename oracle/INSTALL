@@ -3,7 +3,7 @@ HOW TO CREATE AN ORACLE EBS SNAPSHOT.
 
 NB: You will have to dedicate an entire AWS account for the purpose of running an oracle.
 
-Launch a new instance Ubuntu Server 12.04.2 LTS 64 bit AMI ID ami-d0f89fb9.
+Launch a new instance Ubuntu Server 12.04.3 LTS 64 bit AMI ID ami-a73264ce (in zone us-east-1a)
 Wait for the instance to initialize and "Status Checks" showing "2/2 checks passed".
 Stop the instance, wait for the state to become "Stopped", and detach the volume.
 Wait for the volume state to become "available" and attach the volume to any running instance.
@@ -23,7 +23,7 @@ rm /etc/ssh/ssh_host_*
 rm /home/ubuntu/.ssh/authorized_keys
 rm /home/root/.ssh/authorized_keys
 
-Copy the following files from git's oracle directory making sure the permissions and ownership match:
+Copy the following files from git's oracle directory (git tag alpha_oracle) making sure the permissions and ownership match:
  
 rc.local        to /etc/rc.local 	 perm 755	root:root
 ssh.conf        to /etc/init/ssh.conf  	 perm 644 	root:root
@@ -44,7 +44,7 @@ HOW TO CREATE AN ORACLE INSTANCE FROM THE ORACLE EBS SNAPSHOT.
 
 Install ec2-api-tools on your local machine. You need to add a new apt-get repository. Please search online.
 
-ec2-run-instances ami-d0f89fb9 -t t1.micro -z us-east-1a -b /dev/sda1=none -b /dev/sda2=<snap-id>::false:standard -O <Access Key ID> -W <Secret Access Key>
+ec2-run-instances ami-a73264ce -t t1.micro -z us-east-1a -b /dev/sda1=none -b /dev/sda2=snap-25981721::false:standard -O <Access Key ID> -W <Secret Access Key>
 
 Make sure that your EC2 security group allows inbound connections to TCP port 22.
 The rule looks like: Port range: 22, Source: 0.0.0.0/0
@@ -71,11 +71,11 @@ Now compare the hashes of the custom volume to the hashes of the volume from the
 
 cd into the root directory of the mounted volume , e.g. "cd /mnt/myvolume" and "sudo -s"
 
-find . -printf '%h %f %U %G %m %l\n' | sha256sum
-e.g. 3ef4568f919b1defa995df57650e226fa2acfc3924bc4494943286cf42647952
+find . -printf '%h %f %U %G %m %l\n' | sort -t \n | sha256sum
+e.g. 7bf9cb798a6cf4c14d6a5a6349e692f5415ee0396c0928baebbcaf6e10548280
 
 find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum
-e.g. 8914bc0302a8c1b087bba10ff973b0c5fe05381e4644500741beb712c9bd8a21
+e.g. 33bd2eb6b739cfd73a27892a8954dd0cacdae8aa80aaea102b59a933fc16d6b4
 
 e2label /dev/xvd(the letter of the attached volume)
 cloudimg-rootfs
