@@ -34,6 +34,9 @@ logdir = os.path.join(datadir, 'stcppipelogs')
 sslkeylog = os.path.join(datadir, 'sslkeylog')
 sslkey = os.path.join(datadir, 'sslkey')
 ssh_logfile = os.path.join(datadir, 'ssh.log')
+alphatest_key = os.path.join(installdir, 'alphatest.key')
+alphatest_ppk = os.path.join(installdir, 'alphatest.ppk')
+
 
 
 if OS=='win':
@@ -692,6 +695,81 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
        
     return 'success'
 
+def long_to_bytes(n):
+    s = ''
+    n = long(n)
+    while n > 0:
+        s = struct.pack('>I', n & 0xffffffffL) + s
+        n = n >> 32
+    # strip off leading zeros
+    for i in range(len(s)):
+        if s[i] != '\000'[0]:
+            break
+    else:
+        # only happens when n == 0
+        s = '\000'
+        i = 0
+    s = s[i:]
+    return s
+
+#adapted from https://github.com/AdamISZ/ssllog/blob/master/userkeymgmt.py
+def convert_key:
+    global alphatest_key
+    global alphatest_ppk
+    try:
+        with open(alphatest_key, 'r') as f:
+            privkey = rsa.PrivateKey.load_pkcs1(f.read())
+    except:
+        return 'Error reading the key in ' + alphatest_key +'. Make sure the key exists and its data is not corrupted'
+    
+    pkps=[]
+    for a in [privkey.d,privkey.p,privkey.q,privkey.coef]:
+        ab = long_to_bytes(a)
+        if ord(ab[0]) & 0x80: ab=chr(0x00)+ab
+        pkps.append(ab)
+    privkeystring = ''.join([struct.pack(">I",len(pkp))+pkp for pkp in pkps])
+    priv_repr = binascii.b2a_base64(privkeystring)[:-1]
+    
+    #generate pubkey from privkey material, see https://bitbucket.org/sybren/python-rsa/src/509b1d657cb8eb942587be862aef10587b5ea2af/rsa/key.py?at=default#cl-592
+    pubkey = rsa.PublicKey(privkey.n, privkey.e)
+    
+    eb = long_to_bytes(pubkey.e)
+    nb = long_to_bytes(pubkey.n)
+    if ord(eb[0]) & 0x80: eb=chr(0x00)+eb
+    if ord(nb[0]) & 0x80: nb=chr(0x00)+nb
+    keyparts = [ 'ssh-rsa', eb, nb ]
+    keystring = ''.join([ struct.pack(">I",len(kp))+kp for kp in keyparts]) 
+    public_repr = binascii.b2a_base64(keystring)[:-1]
+    
+    macdata = ''
+    for s in ['ssh-rsa','none','imported-openssh-key',keystring, privkeystring]:
+        macdata += (struct.pack(">I",len(s)) + s)
+    
+    HMAC_key = 'putty-private-key-file-mac-key'
+    HMAC_key2 = sha1(HMAC_key).digest()
+    HMAC2 = hmac.new(HMAC_key2,macdata,sha1)
+    
+    with open(alphatest_ppk,'wb') as f:
+        f.write('PuTTY-User-Key-File-2: ssh-rsa\r\n')
+        f.write('Encryption: none\r\n')
+        f.write('Comment: imported-openssh-key\r\n')
+        
+        f.write('Public-Lines: '+str(int((len(public_repr)+63)/64))+'\r\n')
+        for i in range(0,len(public_repr),64):
+            f.write(public_repr[i:i+64])
+            f.write('\r\n')        
+            
+        f.write('Private-Lines: '+str(int((len(priv_repr)+63)/64))+'\r\n')
+        for i in range(0,len(priv_repr),64):
+            f.write(priv_repr[i:i+64])
+            f.write('\r\n')    
+            
+        f.write('Private-MAC: ')
+        f.write(HMAC2.hexdigest())
+        f.write('\r\n')
+    return 'success'
+
+
 #privkey_file should correspond to RSA public key registered on oracle
 #assigned_port should be provided by the escrow
 def start_tunnel(privkey_file, oracle_address):
@@ -702,6 +780,11 @@ def start_tunnel(privkey_file, oracle_address):
     global FF_proxy_port
     global is_ssh_session_active
     
+    if OS=='win':
+        retval = convert_key()
+        if retval != 'success':
+            return retval
+        
     if os.path.isdir(logdir) : shutil.rmtree(logdir)
     os.mkdir(logdir)
     
@@ -712,7 +795,7 @@ def start_tunnel(privkey_file, oracle_address):
     if stcppipe_proc.poll() != None:
         return 'stcppipe error'
     if OS=='linux':
-        ssh_proc = subprocess.Popen([ssh_exepath, '-i', os.path.join(datadir, 'alphatest.key'), '-o', 'StrictHostKeyChecking=no', username+'@'+oracle_address, '-L', str(random_ssh_port)+':localhost:'+assigned_port], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        ssh_proc = subprocess.Popen([ssh_exepath, '-i', alphatest_key, '-o', 'StrictHostKeyChecking=no', username+'@'+oracle_address, '-L', str(random_ssh_port)+':localhost:'+assigned_port], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     elif OS=='win':
         pass
     
