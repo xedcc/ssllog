@@ -25,8 +25,8 @@ TESTING = True
 ALPHA_TESTING = True
 
 platform = platform.system()
-OS = None
 if platform == 'Windows': OS = 'win'
+elif platform == 'Linux': OS = 'linux'
 
 installdir = os.path.dirname(os.path.realpath(__file__))
 datadir = os.path.join(installdir, "data")
