@@ -33,11 +33,24 @@ datadir = os.path.join(installdir, "data")
 logdir = os.path.join(datadir, 'stcppipelogs')
 sslkeylog = os.path.join(datadir, 'sslkeylog')
 sslkey = os.path.join(datadir, 'sslkey')
-stcppipe_exepath = os.path.join(datadir,'stcppipe', 'stcppipe')
-firefox_exepath = '/home/default2/Desktop/firefox-nightly/firefox'
-ssh_exepath = 'ssh'
 ssh_logfile = os.path.join(datadir, 'ssh.log')
-#ssh_exepath = os.path.join(installdir, 'putty')
+
+
+if OS=='win':
+    stcppipe_exepath = os.path.join(datadir,'stcppipe', 'stcppipe.exe')
+    tshark_exepath = os.path.join(datadir,'wireshark', 'tshark.exe')
+    mergecap_exepath = os.path.join(datadir,'wireshark', 'mergecap.exe')
+    plink_exepath = os.path.join(datadir, 'plink.exe')    
+if OS=='linux':
+    stcppipe_exepath = os.path.join(datadir,'stcppipe', 'stcppipe')
+    tshark_exepath = 'tshark'
+    mergecap_exepath = 'mergecap'
+    
+firefox_exepath = 'firefox'
+ssh_exepath = 'ssh'
+
+
+
 random_ssh_port = 0
 #random TCP port on which firefox extension communicates with python backend
 FF_to_backend_port = 0
@@ -227,11 +240,11 @@ def decrypt_escrowtrace():
     tar_object.close()
     
     filelist = os.listdir(escrowtracedir)
-    mergecap_args = ['mergecap', '-w', 'merged'] + filelist
+    mergecap_args = [mergecap_exepath, '-w', 'merged'] + filelist
     #it was observed that mergecap may return before the output file was written entirely. We must give the OS some time to flush everything to disk:
     time.sleep(1)
     subprocess.call(mergecap_args, cwd=escrowtracedir)
-    output = subprocess.check_output(['tshark', '-r', os.path.join(escrowtracedir, 'merged'), '-Y', 'ssl and http.content_type contains html', '-o', 'ssl.keylog_file:'+ sslkey, '-o',  'http.ssl.port:3128', '-x'])
+    output = subprocess.check_output([tshark_exepath, '-r', os.path.join(escrowtracedir, 'merged'), '-Y', 'ssl and http.content_type contains html', '-o', 'ssl.keylog_file:'+ sslkey, '-o',  'http.ssl.port:3128', '-x'])
     if output == '': 
         ssh_proc.stdin.write('exit failure\n')    
         return "Failed to find HTML in escrowtrace"
@@ -337,7 +350,7 @@ def find_page(accno, amount):
     for index, timestamp in enumerate(timestamps):
         print ('Processing file No:'+str(index), end='\r\n')
         filename = timestamp[0]
-        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html and http.response.code == 200', '-o', 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port), '-x'])
+        output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html and http.response.code == 200', '-o', 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port), '-x'])
         if output == '': continue
         #multiple frames are dumped ascendingly. Process from the latest to the earlier.
         frames = output.split('\n\nFrame (')
@@ -367,7 +380,7 @@ def is_clear_cache_needed(filename, frames_no, first_time=False):
         print ('Extra HTML file found in the TCP stream', end='\r\n')
         return True
     if first_time:
-        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.request.method==POST', '-o', 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port)])
+        output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.request.method==POST', '-o', 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port)])
         if output != '':
             print ('POST request found in the TCP stream', end='\r\n')
             return True
@@ -389,7 +402,7 @@ def extract_ssl_key(filename):
         tmpkey_fd.write(key+'\n')
         tmpkey_fd.flush()
         tmpkey_fd.close()
-        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html', '-o', 'ssl.keylog_file:'+ sslkey, '-o', 'http.ssl.port:'+str(random_ssh_port)])
+        output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html', '-o', 'ssl.keylog_file:'+ sslkey, '-o', 'http.ssl.port:'+str(random_ssh_port)])
         if output == '': continue        
         #else key found
         
@@ -397,9 +410,9 @@ def extract_ssl_key(filename):
         #merge all files sans our file and check against the key
         filelist = os.listdir(logdir)
         filelist.remove(filename)
-        mergecap_args = ['mergecap', '-w', 'merged'] + filelist
+        mergecap_args = [mergecap_exepath, '-w', 'merged'] + filelist
         subprocess.call(mergecap_args, cwd=logdir)
-        output = subprocess.check_output(['tshark', '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http', '-o', 'ssl.keylog_file:'+ sslkey, '-o',  'http.ssl.port:'+str(random_ssh_port)])
+        output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http', '-o', 'ssl.keylog_file:'+ sslkey, '-o',  'http.ssl.port:'+str(random_ssh_port)])
         if output != '':
             print ('The unthinkable happened. Our ssl key can decrypt another tcp stream', end='\r\n')
             return 'The unthinkable happened. Our ssl key can decrypt another tcp stream'
@@ -698,7 +711,10 @@ def start_tunnel(privkey_file, oracle_address):
     time.sleep(1)
     if stcppipe_proc.poll() != None:
         return 'stcppipe error'
-    ssh_proc = subprocess.Popen([ssh_exepath, '-i', os.path.join(installdir, 'alphatest.key'), '-o', 'StrictHostKeyChecking=no', username+'@'+oracle_address, '-L', str(random_ssh_port)+':localhost:'+assigned_port], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    if OS=='linux':
+        ssh_proc = subprocess.Popen([ssh_exepath, '-i', os.path.join(datadir, 'alphatest.key'), '-o', 'StrictHostKeyChecking=no', username+'@'+oracle_address, '-L', str(random_ssh_port)+':localhost:'+assigned_port], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    elif OS=='win':
+        pass
     
     is_ssh_session_active = True
     #give sshd 20 secs to respond with 'Tunnel ready'
@@ -751,7 +767,7 @@ if __name__ == "__main__":
    
     if os.path.isfile(os.path.join(datadir, "firstrun")):
         if OS=='linux':
-            #check that ssh, gcc, tshark, and firefox are installed
+            #check that ssh, gcc, tshark, mergecap, and firefox are installed
             try:
                 subprocess.check_output(['which', 'ssh'])
             except:
@@ -767,6 +783,11 @@ if __name__ == "__main__":
             except:
                 print ('Please make sure tshark is installed and in your PATH')
                 exit(1)
+            try:
+                subprocess.check_output(['which', 'mergecap'])
+            except:
+                print ('Please make sure mergecap is installed and in your PATH')
+                exit(1)            
             try:
                 subprocess.check_output(['which', 'firefox'])
             except:
