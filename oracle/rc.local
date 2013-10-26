@@ -16,7 +16,7 @@ apt-get -y install squid3 gcc unzip
 #assign a random password for good measure
 echo ubuntu:$(tr -dc "[:alpha:]" < /dev/urandom | head -c 20) | chpasswd
 sudo -u ubuntu unzip -o /home/ubuntu/stcppipe.zip -d /home/ubuntu
-sudo -u ubuntu gcc -o /home/ubuntu/stcppipe /home/ubuntu/stcppipe.c -DDISABLE_SSL -lpthread 
+sudo -u ubuntu gcc -o /home/ubuntu/stcppipe /home/ubuntu/stcppipe.c -DDISABLE_SSL -DACPDUMP_LOCK -lpthread 
 sudo -u ubuntu /usr/bin/python /home/ubuntu/oracle.py &
 
 exit 0
