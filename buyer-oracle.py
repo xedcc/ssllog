@@ -2,15 +2,22 @@
 from __future__ import print_function
 
 import base64
+import binascii
 import BaseHTTPServer
 import hashlib
+from hashlib import sha1
+import hmac
+import multiprocessing
 import os
 import platform
+import Queue
 import random
 import re
+import rsa
 import shutil
 import signal
 import SimpleHTTPServer
+import struct
 import subprocess
 import sys
 import tarfile
@@ -196,7 +203,8 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
             global stcppipe_proc
             global is_ssh_session_active
             if is_ssh_session_active:
-                os.kill(stcppipe_proc.pid, signal.SIGTERM)
+                #SIGTERM seems to not be able to kill stcppipe
+                os.kill(stcppipe_proc.pid, signal.SIGKILL)
                 ssh_proc.stdin.write('exit\n')
                 ssh_proc.stdin.flush()
                 is_ssh_session_active = False
@@ -713,7 +721,7 @@ def long_to_bytes(n):
     return s
 
 #adapted from https://github.com/AdamISZ/ssllog/blob/master/userkeymgmt.py
-def convert_key:
+def convert_key():
     global alphatest_key
     global alphatest_ppk
     try:
@@ -746,7 +754,7 @@ def convert_key:
         macdata += (struct.pack(">I",len(s)) + s)
     
     HMAC_key = 'putty-private-key-file-mac-key'
-    HMAC_key2 = sha1(HMAC_key).digest()
+    HMAC_key2 = hashlib. sha1(HMAC_key).digest()
     HMAC2 = hmac.new(HMAC_key2,macdata,sha1)
     
     with open(alphatest_ppk,'wb') as f:
@@ -770,6 +778,13 @@ def convert_key:
     return 'success'
 
 
+#a thread to work around Windows' blocking on stderr.readline in start_tunnel
+def enqueue_output(out, queue):
+    for line in iter(out.readline, b''):
+        queue.put(line)
+    out.close()
+    
+    
 #privkey_file should correspond to RSA public key registered on oracle
 #assigned_port should be provided by the escrow
 def start_tunnel(privkey_file, oracle_address):
@@ -794,24 +809,36 @@ def start_tunnel(privkey_file, oracle_address):
     time.sleep(1)
     if stcppipe_proc.poll() != None:
         return 'stcppipe error'
-    if OS=='linux':
+    if OS=='linux':        
         ssh_proc = subprocess.Popen([ssh_exepath, '-i', alphatest_key, '-o', 'StrictHostKeyChecking=no', username+'@'+oracle_address, '-L', str(random_ssh_port)+':localhost:'+assigned_port], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     elif OS=='win':
-        pass
+        ssh_proc = subprocess.Popen([plink_exepath, '-i', alphatest_ppk,  username+'@'+oracle_address, '-L', str(random_ssh_port)+':localhost:'+assigned_port], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        q = Queue.Queue()
+        t = threading.Thread(target=enqueue_output, args=(ssh_proc.stderr, q))
+        t.daemon = True # thread dies with the program
+        t.start()                
     
-    is_ssh_session_active = True
     #give sshd 20 secs to respond with 'Tunnel ready'
     waiting_started = time.time()
     sshlog_fd = open(ssh_logfile, 'w')
     while 1:
         time.sleep(0.5)
-        cmd = ssh_proc.stderr.readline()
+        cmd = ''
+        #Linux doesn't block on readlne here, whereas Windows does
+        if OS=='linux':
+            cmd = ssh_proc.stderr.readline()
+        elif OS=='win':
+            try:  
+                cmd = q.get_nowait()
+            except Queue.Empty:
+                pass
         if not cmd:
-            if time.time() - waiting_started > 2000:
+            if time.time() - waiting_started > 20:
+                os.kill(ssh_proc.pid, signal.SIGTERM)
                 os.kill(stcppipe_proc.pid, signal.SIGTERM)
                 is_ssh_session_active = False
                 sshlog_fd.close()
-                return 'sshd was taking too long to respond'        
+                return 'sshd was taking too long to stat the tunnel'        
             if ssh_proc.poll() != None:
                 os.kill(stcppipe_proc.pid, signal.SIGTERM)
                 sshlog_fd.close()   
@@ -820,6 +847,11 @@ def start_tunnel(privkey_file, oracle_address):
             continue
         sshlog_fd.write(cmd+'\n')
         sshlog_fd.flush()
+        if OS=='win':
+            if cmd.startswith("connection."):
+                #plink is asking to add the host key to the cache. Only happens on first run
+                ssh_proc.stdin.write("y\r\n")
+                continue
         if cmd.startswith('Session finished. Please reconnect and use port '):
             newport = cmd[len('Session finished. Please reconnect and use port '):].split()[0]
             if len(newport) < 4 or len(newport)>5:
