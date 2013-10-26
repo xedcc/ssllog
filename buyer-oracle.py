@@ -27,7 +27,7 @@ import urllib2
 from xml.dom import minidom
 import zipfile
 
-TESTING = True
+TESTING = False
 #ALPHA_TESTING means the users have to enter accno and sum themselves via FF addon
 ALPHA_TESTING = True
 
@@ -66,7 +66,7 @@ random_ssh_port = 0
 FF_to_backend_port = 0
 #random port which FF uses as proxy port. Stcppipe listens on this port
 FF_proxy_port = 0
-oracle_snapID ='snap-f2596bf0'
+oracle_snapID ='snap-25981721'
 
 accno = None
 sum_ = None
@@ -203,8 +203,7 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
             global stcppipe_proc
             global is_ssh_session_active
             if is_ssh_session_active:
-                #SIGTERM seems to not be able to kill stcppipe
-                os.kill(stcppipe_proc.pid, signal.SIGKILL)
+                os.kill(stcppipe_proc.pid, signal.SIGTERM)
                 ssh_proc.stdin.write('exit\n')
                 ssh_proc.stdin.flush()
                 is_ssh_session_active = False
@@ -230,7 +229,9 @@ def decrypt_escrowtrace():
     global random_ssh_port
     global assigned_port
     global html_hash
-    escrowtracedir = os.path.join(installdir, "escrowtrace")
+    global datadir
+    
+    escrowtracedir = os.path.join(datadir, "escrowtrace")
     ssh_proc.stdin.write('sslkey \n')
     #give oracle some time to launch an httpd
     time.sleep(5)
@@ -241,12 +242,12 @@ def decrypt_escrowtrace():
         ssh_proc.stdin.write('exit failure\n')    
         return "Failed to fetch tarball from oracle"
     data = oracle_url.read()
-    tarball = open(os.path.join(installdir, "escrowtrace.tar"), 'w')
+    tarball = open(os.path.join(datadir, "escrowtrace.tar"), 'w')
     tarball.write(data)
     tarball.close()
     if os.path.isdir(escrowtracedir): shutil.rmtree(escrowtracedir)
     os.mkdir(escrowtracedir)
-    tar_object = tarfile.open(os.path.join(installdir, "escrowtrace.tar"))
+    tar_object = tarfile.open(os.path.join(datadir, "escrowtrace.tar"))
     tar_object.extractall(escrowtracedir)
     tar_object.close()
     
@@ -570,7 +571,7 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
             return 'bad oracle'
         instance = one_dns_name.parentNode
     
-        if instance.getElementsByTagName('imageId')[0].firstChild.data != 'ami-d0f89fb9' or\
+        if instance.getElementsByTagName('imageId')[0].firstChild.data != 'ami-a73264ce' or\
         instance.getElementsByTagName('instanceState')[0].getElementsByTagName('name')[0].firstChild.data != 'running' or\
         instance.getElementsByTagName('rootDeviceName')[0].firstChild.data != '/dev/sda1':
             return 'bad oracle'
@@ -811,8 +812,10 @@ def start_tunnel(privkey_file, oracle_address):
         return 'stcppipe error'
     if OS=='linux':        
         ssh_proc = subprocess.Popen([ssh_exepath, '-i', alphatest_key, '-o', 'StrictHostKeyChecking=no', username+'@'+oracle_address, '-L', str(random_ssh_port)+':localhost:'+assigned_port], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        is_ssh_session_active = True
     elif OS=='win':
         ssh_proc = subprocess.Popen([plink_exepath, '-i', alphatest_ppk,  username+'@'+oracle_address, '-L', str(random_ssh_port)+':localhost:'+assigned_port], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        is_ssh_session_active = True
         q = Queue.Queue()
         t = threading.Thread(target=enqueue_output, args=(ssh_proc.stderr, q))
         t.daemon = True # thread dies with the program
