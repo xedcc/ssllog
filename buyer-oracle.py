@@ -13,7 +13,6 @@ import platform
 import Queue
 import random
 import re
-import rsa
 import shutil
 import signal
 import SimpleHTTPServer
@@ -31,13 +30,18 @@ TESTING = False
 #ALPHA_TESTING means the users have to enter accno and sum themselves via FF addon
 ALPHA_TESTING = True
 
-platform = platform.system()
-if platform == 'Windows': OS = 'win'
-elif platform == 'Linux': OS = 'linux'
-
 installdir = os.path.dirname(os.path.realpath(__file__))
+platform = platform.system()
+if platform == 'Windows':
+    OS = 'win'
+    #rsa needed for key conversion
+    import rsa
+elif platform == 'Linux':OS = 'linux'
+    
+
+
 datadir = os.path.join(installdir, "data")
-logdir = os.path.join(datadir, 'stcppipelogs')
+logdir = os.path.join(datadir, 'stcppipe_buyerlog')
 sslkeylog = os.path.join(datadir, 'sslkeylog')
 sslkey = os.path.join(datadir, 'sslkey')
 ssh_logfile = os.path.join(datadir, 'ssh.log')
@@ -58,7 +62,6 @@ if OS=='linux':
     
 firefox_exepath = 'firefox'
 ssh_exepath = 'ssh'
-
 
 
 random_ssh_port = 0
@@ -193,7 +196,7 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
             else:
                 self.send_response(200)
                 self.send_header("response", "check_escrowtrace")
-                self.send_header("value", "failure")
+                self.send_header("value", result)
                 print ('sending failure',end='\r\n')
                 self.end_headers()
                 return     
@@ -233,7 +236,7 @@ def decrypt_escrowtrace():
     
     escrowtracedir = os.path.join(datadir, "escrowtrace")
     ssh_proc.stdin.write('sslkey \n')
-    #give oracle some time to launch an httpd
+    #give oracle some time to create the tarball and launch an httpd
     time.sleep(5)
     #send request to ssh's local forwarding port
     try:
@@ -437,7 +440,7 @@ def extract_ssl_key(filename):
     
     
 #use miniHTTP server to receive commands from Firefox addon and respond to them
-def buyer_start_minihttp_thread(parentthread):
+def buyer_start_minihttp_thread():
     global FF_to_backend_port
     print ('Starting mini http server to communicate with Firefox plugin',end='\r\n')
     try:
@@ -448,8 +451,6 @@ def buyer_start_minihttp_thread(parentthread):
     sa = httpd.socket.getsockname()
     print ("Serving HTTP on", sa[0], "port", sa[1], "...",end='\r\n')
     retval = httpd.serve_forever()
-    #after the server was stopped
-    parentthread.retval = retval
 
 
 def start_firefox():
