@@ -351,6 +351,8 @@ def thread_handle_txid(conn, txid, sshd_ppid):
                     #setup a mini http server and listen for GET requests
                     print ('Starting mini http server')
                     try:
+                        #serve files ralative to root dir
+                        os.chdir(installdir)
                         httpd = StoppableHttpServer(('127.0.0.1', port), HandlerClass)
                         httpd.arg_in = txid
                     except Exception, e:
