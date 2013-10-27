@@ -43,6 +43,7 @@ var isStartTunnelResponded = false
 
 var port = Components.classes["@mozilla.org/process/environment;1"].getService(Components.interfaces.nsIEnvironment).get("FF_to_backend_port")
 log("")
+log_toolbar("")
 
 function homepageLoaded () {
     document.getElementById("textarea").value = ""
@@ -74,6 +75,7 @@ function terminatePressed(){
 }
 
 function startPressed(){
+    log_toolbar("")
     var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
     branch.setCharPref("start_new_session","true")
     check_default_escrow()
@@ -113,6 +115,15 @@ function responseStartTunnel(iteration){
     if (query != "start_tunnel"){
         log("Internal error. Wrong response header: "+query)
         return
+    }
+    if (value.length > 9 ){
+        if (value.slice(0,9) == 'reconnect'){
+            var newport = value.split(';')[1]
+            var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.");
+            branch.setCharPref("uid", newport)
+            startTunnel()
+            return
+        }
     }
     if (value != "success"){
         log("FAILURE starting tunnel: "+ value +". Please let the developers know.")
@@ -170,12 +181,18 @@ function responseCheckEscrow(iteration){
 }
 
 function after_tunnel_started(){
-    alert("You can now open a new tab and login into your bank. Follow the instruction on the panel below")
+    log_toolbar("Navigate to your statement page, fill in the fields and press the blue button -->")
+    alert("You can now open a new tab and login into your bank. Follow the instruction on the bottom toolbar")
 }
 
 function log(string){
     var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
     branch.setCharPref("msg_ipc", string)
+}
+
+function log_toolbar(string){
+    var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
+    branch.setCharPref("msg_toolbar", string)
 }
 
 

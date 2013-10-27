@@ -12,7 +12,7 @@ var isPageMarkedResponded = false
 var isCheckEscrowtraceResponded = false
 var is_accno_entered = false;
 var is_sum_entered = false;
-var pressed_green_once = false;
+var pressed_blue_once = false;
 var was_clearcache_called = false;
 
 if (first_window == 'true'){
@@ -38,7 +38,7 @@ if (first_window == 'true'){
 //Simply send a HEAD request to the python backend to 127.0.0.1:2222/blabla. Backend treats "/blabla" not as a path but as an API call
 //Backend responds with HTTP headers "response":"blabla" and "value":<value from backend>
 function pageMarked(){
-	var button_green = document.getElementById("button_green");
+	var button_blue = document.getElementById("button_blue");
 	var button_grey1 = document.getElementById("button_grey1");
 	var textbox_sum = document.getElementById("textbox_sum");
 	var textbox_accno = document.getElementById("textbox_accno");
@@ -47,19 +47,18 @@ function pageMarked(){
 	var label_accno_white = document.getElementById("label_accno_white");
 	var label_sum = document.getElementById("label_sum");
 	var label_sum_white = document.getElementById("label_sum_white");
-	var info = document.getElementById("label_info");
 	
-	button_green.hidden = true
+	button_blue.hidden = true
 	button_grey1.hidden = false
 
-	if (!pressed_green_once) {
+	if (!pressed_blue_once) {
 		label_accno.hidden = true
 		label_accno_white.hidden = false
 		label_sum.hidden = true
 		label_sum_white.hidden = false
 		textbox_sum.disabled = true
 		textbox_accno.disabled = true
-		pressed_green_once=true
+		pressed_blue_once=true
 	}
 	var accno_str = textbox_accno.value
 	var sum_str = textbox_sum.value
@@ -84,6 +83,7 @@ function pageMarked(){
   reqPageMarked.send();
 
   	log("Finding HTML in our data")
+  	log_toolbar("Finding HTML in our data")
 	isPageMarkedResponded = false
   	setTimeout(responsePageMarked, 1000, 0)    
 }
@@ -102,32 +102,37 @@ function responsePageMarked (iteration) {
     isPageMarkedResponded = true
 	var query = reqPageMarked.getResponseHeader("response");
 	var value = reqPageMarked.getResponseHeader("value");
-	var info = document.getElementById("label_info");
 	if (query != "page_marked") {
 		log("Internal error. Wrong response header: "+ query)
+		log_toolbar("Internal error. Wrong response header: "+ query)
 	}
 	if (value == "success") {
-		log("SUCCESS finding HTML. Now finding the same HTML in escrow's data")
+		log("SUCCESS finding HTML in our data")
+		log_toolbar("SUCCESS finding HTML in our data")
 		setTimeout(checkEscrowtrace, 1000)
 	}
 	else if (value == "clear_ssl_cache") {
 		//var yellow_button = document.getElementById("button_yellow");
 		//yellow_button.hidden = false
 		clearSSLCache()
-		log("Please refresh this page and press blue button again")
+		log("Please refresh this page and press the blue button again")
+		log_toolbar("Please refresh this page and press the blue button again")
 	}
 	else if (value == "failure") {
 		log("FAILURE finding HTML. Please let the developers know")
+		log_toolbar("FAILURE finding HTML. Please let the developers know")
 		terminate()
 	}
 	else {
  		log("Internal Error. Unexpected value: "+value+". Please let the developers knows")
+ 		log_toolbar("Internal Error. Unexpected value: "+value+". Please let the developers knows")
  		terminate()
 	}
 }
 
 function checkEscrowtrace(){
-	log("Asking for escrow's data in order to find HTML there")
+	log("Finding HTML in escrow data")
+	log_toolbar("Finding HTML in escrow data")
 
 	reqCheckEscrowtrace = new XMLHttpRequest();
 	reqCheckEscrowtrace.onload = responseCheckEscrowtrace;
@@ -153,19 +158,23 @@ function responseCheckEscrowtrace (iteration) {
 	var value = reqCheckEscrowtrace.getResponseHeader("value");
 	if (query != "check_escrowtrace") {
 		log("Internal error. Wrong response header: "+ query)
+		log_toolbar("Internal error. Wrong response header: "+ query)
 		terminate()
 	}
 	if (value == "success") {
 		log("SUCCESS finding HTML in escrow's data")
+		log_toolbar("SUCCESS finding HTML in escrow's data")
 		alert("Congratulations! Paysty can be used with your bank's website. You can start a new testing session on the Paysty's tab or close Firefox")
 		terminate()
 	}
 	else if (value == "failure") {
 		log("FAILURE finding HTML in escrow's data. Please let the developers know")
+		log_toolbar("FAILURE finding HTML in escrow's data. Please let the developers know")
 		terminate()
 	}
 	else {
  		log("Internal Error. Unexpected value: "+value+". Please let the developers knows")
+ 		log_toolbar("Internal Error. Unexpected value: "+value+". Please let the developers knows")
  		terminate()
 	}
 }
@@ -226,6 +235,9 @@ function setMiscPrefs(){
 	spdy_prefs.setBoolPref("enabled.v2",false);
 	spdy_prefs.setBoolPref("enabled.v3",false);
 
+	network_websocket_prefs = prefs.getBranch("network.websocket.");
+	network_websocket_prefs.setBoolPref("enabled",false);
+
 	cache_disk_prefs = prefs.getBranch("browser.cache.disk.");	
 	cache_disk_prefs.setBoolPref("enable", false)
 	
@@ -245,10 +257,10 @@ function accno_input() {
 	}
 	is_accno_entered = true;	
 	if (is_sum_entered){
-		 var button_green = document.getElementById("button_green");
+		 var button_blue = document.getElementById("button_blue");
 		 var button_grey1 = document.getElementById("button_grey1");
 		 button_grey1.hidden = true;
-		 button_green.hidden = false;
+		 button_blue.hidden = false;
 	}
 }
 
@@ -258,10 +270,10 @@ function sum_input() {
 	}
 	is_sum_entered = true;
 	if (is_accno_entered){
-		 var button_green = document.getElementById("button_green");
+		 var button_blue = document.getElementById("button_blue");
 		 var button_grey1 = document.getElementById("button_grey1");
 		 button_grey1.hidden = true;
-		 button_green.hidden = false;
+		 button_blue.hidden = false;
 	}
 }
 
@@ -272,17 +284,10 @@ function clearSSLCache() {
 	// button_grey2.hidden = false
 	Components.classes["@mozilla.org/security/sdr;1"].getService(Components.interfaces.nsISecretDecoderRing).logoutAndTeardown();
 	was_clearcache_called = true
-	var button_green = document.getElementById("button_green");
+	var button_blue = document.getElementById("button_blue");
 	var button_grey1 = document.getElementById("button_grey1");
 	button_grey1.hidden = true
-	button_green.hidden = false
-}
-
-function log(string){
-	var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
-	var info = document.getElementById("label_info");
-	info.value = string
-	branch.setCharPref("msg_ipc", string)
+	button_blue.hidden = false
 }
 
 
@@ -295,7 +300,7 @@ function checkNewSession() {
         setTimeout(checkNewSession, 1000);
         return
     }
-   	var button_green = document.getElementById("button_green");
+   	var button_blue = document.getElementById("button_blue");
 	var button_grey1 = document.getElementById("button_grey1");
 	var textbox_sum = document.getElementById("textbox_sum");
 	var textbox_accno = document.getElementById("textbox_accno");
@@ -304,7 +309,7 @@ function checkNewSession() {
 	var label_sum = document.getElementById("label_sum");
 	var label_sum_white = document.getElementById("label_sum_white");
 	
-	button_green.hidden = true
+	button_blue.hidden = true
 	button_grey1.hidden = false
 
 	label_accno.hidden = false
@@ -315,7 +320,7 @@ function checkNewSession() {
 	textbox_sum.value = ""
 	textbox_accno.disabled = false
 	textbox_accno.value = ""
-	pressed_green_once=false
+	pressed_blue_once=false
 
 	is_accno_entered = false
 	is_sum_entered = false
@@ -328,6 +333,16 @@ function terminate(){
     reqTerminate = new XMLHttpRequest();
     reqTerminate.open("HEAD", "http://127.0.0.1:"+port+"/terminate", true);
     reqTerminate.send();    
+}
+
+function log_toolbar(string){
+    var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
+    branch.setCharPref("msg_toolbar", string)
+}
+
+function log(string){
+	var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
+	branch.setCharPref("msg_ipc", string)
 }
 
 if (first_window == "true"){
@@ -346,4 +361,19 @@ if (first_window == "true"){
 	    gBrowser.removeCurrentTab()
 
 	}, 1000)
+}
+
+setTimeout(getToolbarMsg, 3000);
+function getToolbarMsg() {
+    var branch = Components.classes["@mozilla.org/preferences-service;1"]
+                    .getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
+    var msg = branch.getCharPref("msg_toolbar")
+    var info = document.getElementById("label_info");
+    var cur_msg = info.value
+    if (msg == cur_msg){
+        setTimeout(getToolbarMsg, 10);
+        return
+    }
+    info.value = msg
+    setTimeout(getToolbarMsg, 10);
 }
