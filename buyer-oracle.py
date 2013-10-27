@@ -69,7 +69,7 @@ random_ssh_port = 0
 FF_to_backend_port = 0
 #random port which FF uses as proxy port. Stcppipe listens on this port
 FF_proxy_port = 0
-oracle_snapID ='snap-25981721'
+oracle_snapID = 'snap-d4741ed0'
 
 accno = None
 sum_ = None
@@ -105,6 +105,9 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
     
     #Firefox addon speaks with HEAD
     def do_HEAD(self):
+        global ssh_proc
+        global stcppipe_proc
+        global is_ssh_session_active        
         print ('minihttp received ' + self.path + ' request',end='\r\n')
         # example HEAD string "/page_marked?accno=12435678&sum=1234.56"        
         if self.path.startswith('/page_marked'):
@@ -120,6 +123,11 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
                 was_clear_cache_called = params[2]['was_clearcache_called']
             result = find_page(accno, sum_)
             if result[0] != 'success':
+                if is_ssh_session_active:
+                    os.kill(stcppipe_proc.pid, signal.SIGTERM)
+                    ssh_proc.stdin.write("exit\n")
+                    ssh_proc.stdin.flush()
+                    is_ssh_session_active = False                            
                 print ('sending failure. Reason: '+result[0] ,end='\r\n')
                 self.send_response(200)
                 self.send_header("response", "page_marked")
@@ -138,6 +146,11 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
             #else
             retval = extract_ssl_key(filename)
             if retval != 'success':
+                if is_ssh_session_active: 
+                    os.kill(stcppipe_proc.pid, signal.SIGTERM)
+                    ssh_proc.stdin.write("exit\n")
+                    ssh_proc.stdin.flush()
+                    is_ssh_session_active = False                                
                 self.send_response(200)
                 self.send_header("response", "page_marked")
                 self.send_header("value", "failure")
@@ -158,6 +171,7 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
                 retval = check_oracle_urls(*args)
             else:
                 retval = "success"
+            print ('Sending back: '+retval)
             self.send_response(200)
             self.send_header("response", "check_oracle")
             self.send_header("value", retval)
@@ -172,9 +186,13 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
             global assigned_port
             assigned_port = args[1]
             retval = start_tunnel(key_name, args[0])
+            print ('Sending back: '+retval + assigned_port)
             if retval == 'reconnect':
-                print ('Reconnecting to sshd', end='\r\n')
-                retval = start_tunnel(key_name, args[0])
+                self.send_response(200)
+                self.send_header("response", "start_tunnel")
+                #assigned_port now contains the new port which sshd wants us to reconnect to
+                self.send_header("value", "reconnect;"+assigned_port)
+                self.end_headers()                
             if retval != 'success':
                 print ('Error while setting up a tunnel: '+retval, end='\r\n')
             self.send_response(200)
@@ -184,7 +202,13 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
             return
         
             #ALPHA only, request the tarball from oracle; check whether escrow would also decrypt HTML            
-        if self.path.startswith('/check_escrowtrace'):  
+        if self.path.startswith('/check_escrowtrace'):
+            if is_ssh_session_active:
+                #stcppipe needs to quit now, otherwise if FF sends further requests, it will confuse httpd on oracle
+                #which is standing by to serve the tarball of escrow trace
+                os.kill(stcppipe_proc.pid, signal.SIGTERM)
+                #sshd will exit as soon as it sends the tarball, so no need for ssh to send "exit" signal
+                is_ssh_session_active = False            
             result = decrypt_escrowtrace()
             if result == "success":    
                 self.send_response(200)
@@ -202,14 +226,11 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
                 return     
         
         if self.path.startswith('/terminate'):
-            global ssh_proc
-            global stcppipe_proc
-            global is_ssh_session_active
-            if is_ssh_session_active:
+            if is_ssh_session_active: 
                 os.kill(stcppipe_proc.pid, signal.SIGTERM)
-                ssh_proc.stdin.write('exit\n')
+                ssh_proc.stdin.write("exit\n")
                 ssh_proc.stdin.flush()
-                is_ssh_session_active = False
+                is_ssh_session_active = False              
             self.send_response(200)
             self.send_header("response", "terminate")
             self.send_header("value", "success")
@@ -244,6 +265,7 @@ def decrypt_escrowtrace():
     except:
         ssh_proc.stdin.write('exit failure\n')    
         return "Failed to fetch tarball from oracle"
+    print ("Fetched escrow's data. Analyzing...",end='\r\n')
     data = oracle_url.read()
     tarball = open(os.path.join(datadir, "escrowtrace.tar"), 'w')
     tarball.write(data)
@@ -440,7 +462,7 @@ def extract_ssl_key(filename):
     
     
 #use miniHTTP server to receive commands from Firefox addon and respond to them
-def buyer_start_minihttp_thread():
+def buyer_start_minihttp_thread(parentthread):
     global FF_to_backend_port
     print ('Starting mini http server to communicate with Firefox plugin',end='\r\n')
     try:
@@ -539,7 +561,6 @@ def start_firefox():
     os.putenv("FF_first_window", "true")
     
     print ("Starting a new instance of Firefox with a new profile",end='\r\n')
-    print ("Starting a new instance of Firefox with a new profile",end='\r\n')
     if not os.path.isdir(os.path.join(datadir, 'firefox')): os.mkdir(os.path.join(datadir, 'firefox'))
     try:
         ff_proc = subprocess.Popen([firefox_exepath,'-no-remote', '-P', 'ssllog'], stdout=open(os.path.join(datadir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(datadir, 'firefox', "firefox.stderr"), 'w'))
@@ -564,6 +585,8 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
         is_dns_found = False
         dns_names = di_dom.getElementsByTagName('dnsName')
         for one_dns_name in dns_names:
+            if one_dns_name.firstChild == None:
+                continue
             if one_dns_name.firstChild.data != oracle_dns:
                 continue
             is_dns_found = True
@@ -669,7 +692,7 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
             names = lm_dom.getElementsByTagName('Name')
             for one_name in names:
                 if (one_name.firstChild.data == 'VolumeId' and one_name.parentNode.getElementsByTagName('Value')[0].firstChild.data != instance_volumeId) or (one_name.firstChild.data == 'InstanceId' and one_name.parentNode.getElementsByTagName('Value')[0].firstChild.data != instanceId):
-                    print ('Too many volumes or instances detected')
+                    print ('Too many volumes or instances detected', end='\r\n')
                     #return 'bad oracle'
         except Exception,e:
             print(e, end='\r\n')
@@ -890,27 +913,27 @@ if __name__ == "__main__":
             try:
                 subprocess.check_output(['which', 'ssh'])
             except:
-                print ('Please make sure ssh is installed and in your PATH')
+                print ('Please make sure ssh is installed and in your PATH',end='\r\n')
                 exit(1)
             try:
                 subprocess.check_output(['which', 'gcc'])
             except:
-                print ('Please make sure gcc is installed and in your PATH')
+                print ('Please make sure gcc is installed and in your PATH', end='\r\n')
                 exit(1)    
             try:
                 subprocess.check_output(['which', 'tshark'])
             except:
-                print ('Please make sure tshark is installed and in your PATH')
+                print ('Please make sure tshark is installed and in your PATH', end='\r\n')
                 exit(1)
             try:
                 subprocess.check_output(['which', 'mergecap'])
             except:
-                print ('Please make sure mergecap is installed and in your PATH')
+                print ('Please make sure mergecap is installed and in your PATH', end='\r\n')
                 exit(1)            
             try:
                 subprocess.check_output(['which', 'firefox'])
             except:
-                print ('Please make sure firefox is installed and in your PATH')
+                print ('Please make sure firefox is installed and in your PATH', end='\r\n')
                 exit(1)               
     
             #on first run, check stcppipe.zip's hash and compile it
@@ -925,7 +948,7 @@ if __name__ == "__main__":
             try:
                 subprocess.check_output(['gcc', '-o', 'stcppipe', 'stcppipe.c', '-DDISABLE_SSL', '-DACPDUMP_LOCK', '-lpthread'], cwd=os.path.join(datadir, "stcppipe"))
             except:
-                print ('Error compiling stcppipe. Please let the developers know')
+                print ('Error compiling stcppipe. Please let the developers know', end='\r\n')
                 exit(1)            
             os.remove(os.path.join(datadir, "firstrun"))
             
@@ -986,7 +1009,7 @@ if __name__ == "__main__":
         elif  os.path.isfile(os.path.join(os.getenv('programfiles(x86)'), "Mozilla Firefox",  "firefox.exe" )): 
             firefox_exepath = os.path.join(os.getenv('programfiles(x86)'), "Mozilla Firefox",  "firefox.exe" )
         else:
-            print ('Please make sure firefox is installed and in your PATH')
+            print ('Please make sure firefox is installed and in your PATH', end='\r\n')
             exit(1)                               
             
          
