@@ -161,7 +161,7 @@ function responseCheckEscrowtrace (iteration) {
 	if (value == "success") {
 		log("SUCCESS finding HTML in escrow's data");
 		log_toolbar("SUCCESS finding HTML in escrow's data");
-		alert("Congratulations! Paysty can be used with your bank's website. You can start a new testing session on the Paysty's tab or close Firefox");
+		alert("Congratulations! Paysty can be used with your bank's website. You can either start the fun again on Paysty's tab or close Firefox");
 		terminate();
 	}
 	else if (value == "failure") {
