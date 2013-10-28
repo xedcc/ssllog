@@ -961,19 +961,21 @@ if __name__ == "__main__":
         if OS=='win':
             #check hash and unzip stcppipe
             #stcppipe by Luigi Auriemma http://aluigi.altervista.org/mytoolz/stcppipe.zip v.0.4.8b
-            sp_fd = open(os.path.join(datadir,"stcppipe.zip"), 'r')
+            sp_fd = open(os.path.join(datadir,"stcppipe.zip"), 'rb')
             sp_bin = sp_fd.read()
             sp_fd.close()
-            if (hashlib.sha256(sp_bin).hexdigest() != "33713607560a2e04205ed16de332792abbf26672226afb87651008d4366ae54a"):
+            if (hashlib.sha256(sp_bin).hexdigest() != "3fe9e52633d923733841f7d20d1c447f0ec2e85557f68bac3f25ec2824b724e8"):
+                print ('Wrong stcppipe.zip hash')
                 exit(1)
             zfile = zipfile.ZipFile(os.path.join(datadir, "stcppipe.zip"))
             zfile.extractall(os.path.join(datadir, "stcppipe"))
                         
             #plink v0.63.0.0 (part of Putty suite) http://www.chiark.greenend.org.uk/~sgtatham/putty/download.html
-            pl_fd = open(os.path.join(datadir,"plink.exe"), 'r')
+            pl_fd = open(os.path.join(datadir,"plink.exe"), 'rb')
             pl_bin = pl_fd.read()
             pl_fd.close()
-            if (hashlib.sha256(pl_bin).hexdigest() != "938367a69b9a0c90ae136e4740a56e3ac16d008f26f13c18a4fd59c999e1e453"):
+            if (hashlib.sha256(pl_bin).hexdigest() != "fe465e89b87dfb17441053149133e0413dafea81ea36fa3caaca3a72445bc475"):
+                print('Wrong plink.exe hash')
                 exit(1)
                 
             #python 2.7 
@@ -990,10 +992,12 @@ if __name__ == "__main__":
             hashlist = []
             for root, dirs, files in os.walk(os.path.join(datadir, "Python27")):
                 for file in files:
-                    with open((os.path.join(root,file)), 'r') as f:
+                    if file.endswith('.pyc'): continue
+                    with open((os.path.join(root,file)), 'rb') as f:
                         hashlist.append(hashlib.sha256(f.read()).hexdigest())
             hashlist.sort()
-            if hashlib.sha256(','.join(hashlist)).hexdigest() != 'c3b1a3b85c55e047a6c16695cfd37b4181b840d38957f990deda0e24ae3b92ff':
+            if hashlib.sha256(','.join(hashlist)).hexdigest() != '199c5bb8c193256527625c60e0b4eea6b74bc3bf9bb68532e77e21b5d7c21969':
+                print ('Wrong hash for files in Python27 dir')
                 exit(1)
                            
             # tshark and mergecap v1.10.2 (part of Wireshark suite)
@@ -1002,10 +1006,11 @@ if __name__ == "__main__":
             hashlist = []
             for root, dirs, files in os.walk(os.path.join(datadir, "wireshark")):
                 for file in files:
-                    with open((os.path.join(root,file)), 'r') as f:
+                    with open((os.path.join(root,file)), 'rb') as f:
                         hashlist.append(hashlib.sha256(f.read()).hexdigest())
             hashlist.sort()
-            if hashlib.sha256(','.join(hashlist)).hexdigest() != 'f847efc229ebc652152299aeed27bb67e07d9c6736961af6024e54c3d22f8885':
+            if hashlib.sha256(','.join(hashlist)).hexdigest() != 'acf45ac870a044aabb60d64e33c79724a8a6e0c8aa9133ef171c093186817abf':
+                print ('Wrong hash for files in wireshark dir')
                 exit(1)            
             os.remove(os.path.join(datadir, "firstrun"))
             
