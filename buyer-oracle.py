@@ -280,7 +280,12 @@ def decrypt_escrowtrace():
     mergecap_args = [mergecap_exepath, '-w', 'merged'] + filelist
     #it was observed that mergecap may return before the output file was written entirely. We must give the OS some time to flush everything to disk:
     time.sleep(1)
-    subprocess.call(mergecap_args, cwd=escrowtracedir)
+    try:
+        subprocess.call(mergecap_args, cwd=escrowtracedir)
+    except:
+        ssh_proc.stdin.write('exit failure\n')
+        print ('Mergecap error',  end='\r\n')
+        return 'Mergecap error'
     output = subprocess.check_output([tshark_exepath, '-r', os.path.join(escrowtracedir, 'merged'), '-Y', 'ssl and http.content_type contains html', '-o', 'ssl.keylog_file:'+ sslkey, '-o',  'http.ssl.port:3128', '-x'])
     if output == '': 
         ssh_proc.stdin.write('exit failure\n')    
