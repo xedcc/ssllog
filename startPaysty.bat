@@ -1,1 +1,1 @@
-%~dp0data\Python27\python.exe %~dp0buyer-oracle.py
+"%~dp0data\Python27\python.exe" "%~dp0buyer-oracle.py"
