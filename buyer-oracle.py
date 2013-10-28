@@ -2,8 +2,9 @@
 from __future__ import print_function
 
 import base64
-import binascii
 import BaseHTTPServer
+import binascii
+import ctypes
 import hashlib
 from hashlib import sha1
 import hmac
@@ -909,13 +910,13 @@ def start_tunnel(privkey_file, oracle_address):
             return 'success'
     
     
-
-
-
 if __name__ == "__main__": 
     #show small dialog. It will go away as soon as addon sends "started" signal to backend
-   
+    if OS=='win':
+        MessageBox = ctypes.windll.user32.MessageBoxA        
+         
     if os.path.isfile(os.path.join(datadir, "firstrun")):
+        print ('Running for the first time. Initializing...',end='\r\n')
         if OS=='linux':
             #check that ssh, gcc, tshark, mergecap, and firefox are installed
             try:
@@ -968,9 +969,11 @@ if __name__ == "__main__":
             sp_fd.close()
             if (hashlib.sha256(sp_bin).hexdigest() != "3fe9e52633d923733841f7d20d1c447f0ec2e85557f68bac3f25ec2824b724e8"):
                 print ('Wrong stcppipe.zip hash')
+                MessageBox(None, 'Wrong stcppipe.zip hash', 'Error', 0)                       
                 exit(1)
             zfile = zipfile.ZipFile(os.path.join(datadir, "stcppipe.zip"))
             zfile.extractall(os.path.join(datadir, "stcppipe"))
+            print ('stcppipe extracted...',end='\r\n')            
                         
             #plink v0.63.0.0 (part of Putty suite) http://www.chiark.greenend.org.uk/~sgtatham/putty/download.html
             pl_fd = open(os.path.join(datadir,"plink.exe"), 'rb')
@@ -978,6 +981,7 @@ if __name__ == "__main__":
             pl_fd.close()
             if (hashlib.sha256(pl_bin).hexdigest() != "fe465e89b87dfb17441053149133e0413dafea81ea36fa3caaca3a72445bc475"):
                 print('Wrong plink.exe hash')
+                MessageBox(None, 'Wrong plink.exe hash', 'Error', 0)                                       
                 exit(1)
                 
             #python 2.7 
@@ -998,8 +1002,9 @@ if __name__ == "__main__":
                     with open((os.path.join(root,file)), 'rb') as f:
                         hashlist.append(hashlib.sha256(f.read()).hexdigest())
             hashlist.sort()
-            if hashlib.sha256(','.join(hashlist)).hexdigest() != '199c5bb8c193256527625c60e0b4eea6b74bc3bf9bb68532e77e21b5d7c21969':
+            if hashlib.sha256(','.join(hashlist)).hexdigest() != '385988b449cf117ebbdd6b98a1d1017b102b87cfaf797143d4a9f56bf374a809':
                 print ('Wrong hash for files in Python27 dir')
+                MessageBox(None, 'Wrong hash for files in Python27 dir', 'Error', 0)                                                       
                 exit(1)
                            
             # tshark and mergecap v1.10.2 (part of Wireshark suite)
@@ -1013,8 +1018,11 @@ if __name__ == "__main__":
             hashlist.sort()
             if hashlib.sha256(','.join(hashlist)).hexdigest() != 'acf45ac870a044aabb60d64e33c79724a8a6e0c8aa9133ef171c093186817abf':
                 print ('Wrong hash for files in wireshark dir')
+                MessageBox(None, 'Wrong hash for files in wireshark dir', 'Error', 0)                                                                       
                 exit(1)            
             os.remove(os.path.join(datadir, "firstrun"))
+            print ('plink and python integrity checked...',end='\r\n')            
+            
             
     if OS=='win':
         if os.path.isfile(os.path.join(os.getenv('programfiles'), "Mozilla Firefox",  "firefox.exe" )): 
@@ -1023,6 +1031,7 @@ if __name__ == "__main__":
             firefox_exepath = os.path.join(os.getenv('programfiles(x86)'), "Mozilla Firefox",  "firefox.exe" )
         else:
             print ('Please make sure firefox is installed and in your PATH', end='\r\n')
+            MessageBox(None, 'Please make sure Firefox is installed. If it is already installed, make sure it is in your Program Files folder', 'Error', 0)
             exit(1)                               
             
          
@@ -1036,6 +1045,7 @@ if __name__ == "__main__":
     ff_retval = start_firefox()
     if ff_retval[0] != 'success':
         print ('Error while starting Firefox: '+ff_retval, end='\r\n')
+        if OS=='win':  MessageBox(None, 'Error while starting Firefox: '+ff_retval, 'Error', 0)
         exit(1)
     ff_proc = ff_retval[1]    
     
