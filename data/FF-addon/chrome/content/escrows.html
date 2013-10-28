@@ -201,7 +201,7 @@ function saveChanges(){
 function editEscrow(){
     escrow_name = currently_selected
     
-    document.getElementById("input_add_new_escrow_escrow_name").value =  document.getElementById("input_dns_name").value
+    document.getElementById("input_add_new_escrow_escrow_name").value =  escrow_name
     document.getElementById("input_add_new_escrow_escrow_name").setAttribute("disabled","true")
     document.getElementById("input_add_new_escrow_dns_name").value =  document.getElementById("input_dns_name").value
     document.getElementById("input_add_new_escrow_getuserurl").value =  document.getElementById("input_getuserurl").value

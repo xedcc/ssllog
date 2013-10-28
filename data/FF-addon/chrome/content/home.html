@@ -25,7 +25,6 @@
 <button class="btn btn-primary btn-lg" style="margin-bottom:30px;" onclick="startPressed()">Start the fun</button>
 <button class="btn btn-primary btn-lg" style="margin-bottom:30px;" onclick="terminatePressed()">Terminate</button>
 
-
 <p>Below you'll see everything that is going on under the hood so that you could report to developers in case of a problem:</p>
 <textarea id="textarea" cols="40" rows="5" type="text" name="message" style="width:100%;resize:none;" autocomplete="off" readonly>
 </textarea>
@@ -77,7 +76,7 @@ function terminatePressed(){
 function startPressed(){
     log_toolbar("")
     var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.")
-    branch.setCharPref("start_new_session","true")
+    branch.setBoolPref("start_new_session",true)
     check_default_escrow()
     //when response is received startTunnel() will be called from within the response handler
 }
@@ -151,7 +150,8 @@ function check_default_escrow(){
     reqCheckEscrow.open("HEAD", "http://127.0.0.1:"+port+"/check_oracle?"+base64string, true);
     reqCheckEscrow.send();
     //give 20 secs for escrow to respond
-    setTimeout(responseCheckEscrow, 1000, 0)    
+    setTimeout(responseCheckEscrow, 1000, 0)
+
 }
 
 function responseCheckEscrow(iteration){
