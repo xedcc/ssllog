@@ -46,7 +46,7 @@ logdir = os.path.join(datadir, 'stcppipe_buyerlog')
 sslkeylog = os.path.join(datadir, 'sslkeylog')
 sslkey = os.path.join(datadir, 'sslkey')
 ssh_logfile = os.path.join(datadir, 'ssh.log')
-alphatest_key = os.path.join(installdir, 'alphatest.key')
+alphatest_key = os.path.join(installdir, 'alphatest.txt')
 alphatest_ppk = os.path.join(installdir, 'alphatest.ppk')
 
 
