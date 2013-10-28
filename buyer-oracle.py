@@ -183,7 +183,7 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
             arg_str = self.path.split('?')[1]
             args = arg_str.split(";")
             if ALPHA_TESTING:
-                key_name = "alphatest.key"
+                key_name = "alphatest.txt"
             global assigned_port
             assigned_port = args[1]
             retval = start_tunnel(key_name, args[0])
