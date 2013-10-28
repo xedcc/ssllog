@@ -378,11 +378,13 @@ def get_html_from_asciidump(ascii_dump):
                 break
         return binary_html.split('\r\n\r\n', 1)[1]
    
-    
-
 def find_page(accno, amount):
     global random_ssh_port
     global html_hash
+    #if chars were not ascii, JS sent it to us in url-encoded unicode
+    accno = urllib2.unquote(accno)
+    amount = urllib2.unquote(amount)
+    
     filelist = os.listdir(logdir)
     timestamps = []
     for f in filelist:
