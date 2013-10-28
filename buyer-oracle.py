@@ -1002,7 +1002,7 @@ if __name__ == "__main__":
                     with open((os.path.join(root,file)), 'rb') as f:
                         hashlist.append(hashlib.sha256(f.read()).hexdigest())
             hashlist.sort()
-            if hashlib.sha256(','.join(hashlist)).hexdigest() != '385988b449cf117ebbdd6b98a1d1017b102b87cfaf797143d4a9f56bf374a809':
+            if hashlib.sha256(','.join(hashlist)).hexdigest() != 'fe2ff1f8f9f7edceb96ef84cbf72262992d94fb21436bdb9507dec0c552b8e54':
                 print ('Wrong hash for files in Python27 dir')
                 MessageBox(None, 'Wrong hash for files in Python27 dir', 'Error', 0)                                                       
                 exit(1)
