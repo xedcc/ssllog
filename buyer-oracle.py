@@ -267,7 +267,7 @@ def decrypt_escrowtrace():
         return "Failed to fetch tarball from oracle"
     print ("Fetched escrow's data. Analyzing...",end='\r\n')
     data = oracle_url.read()
-    tarball = open(os.path.join(datadir, "escrowtrace.tar"), 'w')
+    tarball = open(os.path.join(datadir, "escrowtrace.tar"), 'wb')
     tarball.write(data)
     tarball.close()
     if os.path.isdir(escrowtracedir): shutil.rmtree(escrowtracedir)
@@ -275,6 +275,7 @@ def decrypt_escrowtrace():
     tar_object = tarfile.open(os.path.join(datadir, "escrowtrace.tar"))
     tar_object.extractall(escrowtracedir)
     tar_object.close()
+    
     
     filelist = os.listdir(escrowtracedir)
     mergecap_args = [mergecap_exepath, '-w', 'merged'] + filelist
