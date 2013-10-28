@@ -829,6 +829,8 @@ def start_tunnel(privkey_file, oracle_address):
     global FF_proxy_port
     global is_ssh_session_active
     
+    if not os.path.isfile(alphatest_key): return 'Please make sure alphatest.txt is in your installation directory'
+    
     if OS=='win':
         retval = convert_key()
         if retval != 'success':
