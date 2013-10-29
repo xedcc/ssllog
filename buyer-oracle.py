@@ -488,7 +488,9 @@ def buyer_start_minihttp_thread(parentthread):
 def start_firefox():
     global FF_to_backend_port 
     
-    
+    if not os.path.isdir(os.path.join(datadir, 'firefox')): os.mkdir(os.path.join(datadir, 'firefox'))
+    if not os.path.isfile(os.path.join(datadir, 'firefox', 'firefox.stdout')): open(os.path.join(datadir, 'firefox', 'firefox.stdout'), 'w').close()
+    if not os.path.isfile(os.path.join(datadir, 'firefox', 'firefox.stderr')): open(os.path.join(datadir, 'firefox', 'firefox.stderr'), 'w').close()    
     if not os.path.isfile(os.path.join(datadir, 'FF-profile', 'extensions.ini')):
     #FF rewrites extensions.ini on first run, so we allow FF to create it, then we kill FF, rewrite the file and start FF again
         try:
@@ -522,9 +524,6 @@ def start_firefox():
     os.putenv("FF_first_window", "true")
     
     print ("Starting a new instance of Firefox with a new profile",end='\r\n')
-    if not os.path.isdir(os.path.join(datadir, 'firefox')): os.mkdir(os.path.join(datadir, 'firefox'))
-    if not os.path.isfile(os.path.join(datadir, 'firefox', 'firefox.stdout')): open(os.path.join(datadir, 'firefox', 'firefox.stdout'), 'w').close()
-    if not os.path.isfile(os.path.join(datadir, 'firefox', 'firefox.stderr')): open(os.path.join(datadir, 'firefox', 'firefox.stderr'), 'w').close()
     try:
         ff_proc = subprocess.Popen([firefox_exepath,'-no-remote', '-profile', os.path.join(datadir, 'FF-profile')], stdout=open(os.path.join(datadir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(datadir, 'firefox', "firefox.stderr"), 'w'))
     except Exception,e:
