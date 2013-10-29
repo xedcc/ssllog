@@ -814,10 +814,10 @@ def start_tunnel(privkey_file, oracle_address):
         t.start()                
     
     #give sshd 20 secs to respond with 'Tunnel ready'
+    first_run = False
     waiting_started = time.time()
     sshlog_fd = open(ssh_logfile, 'w')
     while 1:
-        time.sleep(0.5)
         cmd = ''
         #Linux doesn't block on readlne here, whereas Windows does
         if OS=='linux':
@@ -838,25 +838,19 @@ def start_tunnel(privkey_file, oracle_address):
                 os.kill(stcppipe_proc.pid, signal.SIGTERM)
                 sshlog_fd.close()   
                 is_ssh_session_active = False
-                return 'ssh exited abruptly'
+                if first_run: return 'Server timed out. This happens when you log in for the first time. Please try again'
+                else: return 'ssh exited abruptly'
             continue
         sshlog_fd.write(cmd+'\n')
         sshlog_fd.flush()
         if OS=='win':
             if cmd.startswith("connection."):
-                #plink is asking to add the host key to the cache. Only happens on first run
-                #we simplfy the program's logic and make sure we don't login within the 3 seconds window alloted by sshd                
-                time.sleep(3)
+                #only happens on first run plink is adding host keys to windows registry
+                #because of ths delay we may fail to make the 3 seconds window allowed to finish logging in
                 ssh_proc.stdin.write("y\r\n")
                 ssh_proc.stdin.flush()
-                #give plink some time to write the host key into registry and start over                 
-                time.sleep(1)
-                try:
-                    os.kill(ssh_proc.pid, signal.SIGTERM)
-                    os.kill(stcppipe_proc.pid, signal.SIGTERM)
-                except:
-                    pass
-                return start_tunnel(privkey_file, oracle_address)                
+                first_run = False
+                continue
         if cmd.startswith('Session finished. Please reconnect and use port '):
             newport = cmd[len('Session finished. Please reconnect and use port '):].split()[0]
             if len(newport) < 4 or len(newport)>5:
