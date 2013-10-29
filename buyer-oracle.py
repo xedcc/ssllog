@@ -4,6 +4,7 @@ from __future__ import print_function
 import base64
 import BaseHTTPServer
 import binascii
+import codecs
 import ctypes
 import hashlib
 from hashlib import sha1
@@ -486,81 +487,32 @@ def buyer_start_minihttp_thread(parentthread):
 
 def start_firefox():
     global FF_to_backend_port 
-    global OS
-    #we could ask user to run Firefox with -ProfileManager and create a new profile themselves
-    #but to be as user-friendly as possible, we add a new Firefox profile behind the scenes
     
-    homedir = os.path.expanduser("~")
-    if homedir == "~":
-        print ("Couldn't find user's home directory",end='\r\n')
-        return ["Couldn't find user's home directory"]
-    #todo allow user to specify firefox profile dir manually 
-    if OS=='win':
-        ff_profile_root = os.path.join(os.getenv('APPDATA'), "Mozilla", "Firefox", "Profiles")
-        inifile = os.path.join(os.getenv('APPDATA'), "Mozilla", "Firefox", "profiles.ini")
-    elif OS=='linux':
-        ff_profile_root = os.path.join(homedir, ".mozilla", "firefox")
-        inifile = os.path.join(ff_profile_root, "profiles.ini")
-    # skip this step if "ssllog" profile already exists
-    if (not os.path.isdir(os.path.join(ff_profile_root, "ssllog_profile"))):
-        os.mkdir(os.path.join(ff_profile_root, 'ssllog_profile'))        
-        print ("Tweaking our profile's directory",end='\r\n')
-       
-        try:
-            inifile_fd = open(inifile, "r+")
-        except Exception,e: 
-            print ('Could not open profiles.ini. Make sure it exists and you have sufficient read/write permissions',e,end='\r\n')
-            return ['Could not open profiles.ini']
-        text = inifile_fd.read()
-   
-        #get the last profile number and increase it by 1 for our profile
-        our_profile_number = int( text[ text.rfind("[Profile")+len("[Profile"): ].split("]")[0] ) +1
     
+    if not os.path.isfile(os.path.join(datadir, 'FF-profile', 'extensions.ini')):
+    #FF rewrites extensions.ini on first run, so we allow FF to create it, then we kill FF, rewrite the file and start FF again
         try:
-            inifile_fd.seek(0, os.SEEK_END)
-            inifile_fd.write('[Profile' +str(our_profile_number) + ']\nName=ssllog\nIsRelative=1\nPath='+("Profiles/" if OS=='win' else "") +'ssllog_profile\n\n')
+            ff_proc = subprocess.Popen([firefox_exepath,'-no-remote', '-profile', os.path.join(datadir, 'FF-profile')], stdout=open(os.path.join(datadir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(datadir, 'firefox', "firefox.stderr"), 'w'))
         except Exception,e:
-            print ('Could not write to profiles.ini. Make sure you have sufficient write permissions',e,end='\r\n')
-            return ['Could not write to profiles.ini']
-        inifile_fd.close()
-    
-        ff_extensions_dir = os.path.join(ff_profile_root, "ssllog_profile", "extensions")
-        os.mkdir(ff_extensions_dir)        
-        #extension dir contains a file with a path the the addon files in our installdir
-        try:
-            mfile = open (os.path.join(ff_extensions_dir, "lspnr@lspnr.net"), "w+")
-        except Exception,e:
-            print ('File open error', e,end='\r\n')
-            #return 'File open error'
+            print ("Error starting Firefox", e,end='\r\n')
+            return ["Error starting Firefox"]
         
-        #write the path into the file
-        try:
-            mfile.write(os.path.join(datadir,"FF-addon"))
-        except Exception,e:
-            print ('File write error', e,end='\r\n')
-            return ['File write error']
-        mfile.close()
-        
+        while 1:
+            time.sleep(0.5)
+            if os.path.isfile(os.path.join(datadir, 'FF-profile', 'extensions.ini')):
+                ff_proc.kill()
+                break
+                    
         #prevent FF from prompting the user to install extenxion
         try:
-            mfile = open (os.path.join(ff_profile_root, 'ssllog_profile', 'extensions.ini'), "w")
+            mfile = codecs.open (os.path.join(datadir, 'FF-profile', 'extensions.ini'), "w")
         except Exception,e:
             print ('File open error', e,end='\r\n')
             return ['File open error'] 
-        mfile.write("[ExtensionDirs]\nExtension0=" + os.path.join(datadir, "FF-addon") + "\n")
+        mfile.write("[ExtensionDirs]\nExtension0=" + os.path.join(datadir, 'FF-profile', "extensions", "lspnr@lspnr") + "\n")
         mfile.close()
-        
-        #force displaying of add-on toolbar
-        try:
-            mfile = open (os.path.join(ff_profile_root, 'ssllog_profile', 'localstore.rdf'), "w+")
-        except Exception,e:
-            print ('File open error', e,end='\r\n')
-            return ['File open error'] 
-        mfile.write(r'<?xml version="1.0"?><RDF:RDF xmlns:NC="http://home.netscape.com/NC-rdf#" xmlns:RDF="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><RDF:Description RDF:about="chrome://browser/content/browser.xul"><NC:persist RDF:resource="chrome://browser/content/browser.xul#addon-bar" collapsed="false"/></RDF:Description></RDF:RDF>')
-        mfile.close()        
-        
-
-    #SSLKEYLOGFILE
+    
+   
     if os.path.isfile(sslkeylog): os.remove(sslkeylog)
     open(sslkeylog,'w').close()
     os.putenv("SSLKEYLOGFILE", sslkeylog)
@@ -572,11 +524,15 @@ def start_firefox():
     print ("Starting a new instance of Firefox with a new profile",end='\r\n')
     if not os.path.isdir(os.path.join(datadir, 'firefox')): os.mkdir(os.path.join(datadir, 'firefox'))
     try:
-        ff_proc = subprocess.Popen([firefox_exepath,'-no-remote', '-P', 'ssllog'], stdout=open(os.path.join(datadir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(datadir, 'firefox', "firefox.stderr"), 'w'))
+        ff_proc = subprocess.Popen([firefox_exepath,'-no-remote', '-profile', os.path.join(datadir, 'FF-profile')], stdout=open(os.path.join(datadir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(datadir, 'firefox', "firefox.stderr"), 'w'))
     except Exception,e:
         print ("Error starting Firefox", e,end='\r\n')
         return ["Error starting Firefox"]   
     return ['success', ff_proc]
+
+
+
+
 
 
 #using AWS query API make sure oracle meets the criteria
@@ -1046,7 +1002,7 @@ if __name__ == "__main__":
   
     ff_retval = start_firefox()
     if ff_retval[0] != 'success':
-        print ('Error while starting Firefox: '+ff_retval, end='\r\n')
+        print ('Error while starting Firefox: '+ ff_retval[0], end='\r\n')
         if OS=='win':  MessageBox(None, 'Error while starting Firefox: '+ff_retval, 'Error', 0)
         exit(1)
     ff_proc = ff_retval[1]    
