@@ -849,7 +849,7 @@ def start_tunnel(privkey_file, oracle_address):
                 #because of ths delay we may fail to make the 3 seconds window allowed to finish logging in
                 ssh_proc.stdin.write("y\r\n")
                 ssh_proc.stdin.flush()
-                first_run = False
+                first_run = True
                 continue
         if cmd.startswith('Session finished. Please reconnect and use port '):
             newport = cmd[len('Session finished. Please reconnect and use port '):].split()[0]
