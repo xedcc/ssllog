@@ -523,6 +523,8 @@ def start_firefox():
     
     print ("Starting a new instance of Firefox with a new profile",end='\r\n')
     if not os.path.isdir(os.path.join(datadir, 'firefox')): os.mkdir(os.path.join(datadir, 'firefox'))
+    if not os.path.isfile(os.path.join(datadir, 'firefox', 'firefox.stdout')): open(os.path.join(datadir, 'firefox', 'firefox.stdout'), 'w').close()
+    if not os.path.isfile(os.path.join(datadir, 'firefox', 'firefox.stderr')): open(os.path.join(datadir, 'firefox', 'firefox.stderr'), 'w').close()
     try:
         ff_proc = subprocess.Popen([firefox_exepath,'-no-remote', '-profile', os.path.join(datadir, 'FF-profile')], stdout=open(os.path.join(datadir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(datadir, 'firefox', "firefox.stderr"), 'w'))
     except Exception,e:
@@ -1003,7 +1005,7 @@ if __name__ == "__main__":
     ff_retval = start_firefox()
     if ff_retval[0] != 'success':
         print ('Error while starting Firefox: '+ ff_retval[0], end='\r\n')
-        if OS=='win':  MessageBox(None, 'Error while starting Firefox: '+ff_retval, 'Error', 0)
+        if OS=='win':  MessageBox(None, 'Error while starting Firefox: '+ff_retval[0], 'Error', 0)
         exit(1)
     ff_proc = ff_retval[1]    
     
