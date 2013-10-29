@@ -845,8 +845,18 @@ def start_tunnel(privkey_file, oracle_address):
         if OS=='win':
             if cmd.startswith("connection."):
                 #plink is asking to add the host key to the cache. Only happens on first run
+                #we simplfy the program's logic and make sure we don't login within the 3 seconds window alloted by sshd                
+                time.sleep(3)
                 ssh_proc.stdin.write("y\r\n")
-                continue
+                ssh_proc.stdin.flush()
+                #give plink some time to write the host key into registry and start over                 
+                time.sleep(1)
+                try:
+                    os.kill(ssh_proc.pid, signal.SIGTERM)
+                    os.kill(stcppipe_proc.pid, signal.SIGTERM)
+                except:
+                    pass
+                return start_tunnel(privkey_file, oracle_address)                
         if cmd.startswith('Session finished. Please reconnect and use port '):
             newport = cmd[len('Session finished. Please reconnect and use port '):].split()[0]
             if len(newport) < 4 or len(newport)>5:
