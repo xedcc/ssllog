@@ -958,6 +958,8 @@ if __name__ == "__main__":
             #=XXA9
             #-----END PGP SIGNATURE----- 
             #All unnecessary components were deleted
+            #msvcr*90.dll files for winXP compatibility from:
+            #http://portablepython.com/wiki/PortablePython2.7.5.1  (SHA1 - deb49e5d9a82f192eaab1e6786156fc6a5368c03)
             hashlist = []
             for root, dirs, files in os.walk(os.path.join(datadir, "Python27")):
                 for file in files:
@@ -965,7 +967,7 @@ if __name__ == "__main__":
                     with open((os.path.join(root,file)), 'rb') as f:
                         hashlist.append(hashlib.sha256(f.read()).hexdigest())
             hashlist.sort()
-            if hashlib.sha256(','.join(hashlist)).hexdigest() != 'fe2ff1f8f9f7edceb96ef84cbf72262992d94fb21436bdb9507dec0c552b8e54':
+            if hashlib.sha256(','.join(hashlist)).hexdigest() != '160c6d97c0d0ce3bab388d7242eb4499f98841aab001462951e664cb6103fac9':
                 print ('Wrong hash for files in Python27 dir')
                 MessageBox(None, 'Wrong hash for files in Python27 dir', 'Error', 0)                                                       
                 exit(1)
@@ -973,13 +975,13 @@ if __name__ == "__main__":
             # tshark and mergecap v1.10.2 (part of Wireshark suite)
             # http://wiresharkdownloads.riverbed.com/wireshark/win32/WiresharkPortable-1.10.2.paf.exe or
             # http://sourceforge.net/projects/wireshark/files/win32/WiresharkPortable-1.10.2.paf.exe/download
-            hashlist = []
+            hashlist = []                        
             for root, dirs, files in os.walk(os.path.join(datadir, "wireshark")):
                 for file in files:
                     with open((os.path.join(root,file)), 'rb') as f:
                         hashlist.append(hashlib.sha256(f.read()).hexdigest())
             hashlist.sort()
-            if hashlib.sha256(','.join(hashlist)).hexdigest() != 'acf45ac870a044aabb60d64e33c79724a8a6e0c8aa9133ef171c093186817abf':
+            if hashlib.sha256(','.join(hashlist)).hexdigest() != 'e2093eaf89f0a8691ade68fd596f878eed6b389278d3b482382284432115c8e3':
                 print ('Wrong hash for files in wireshark dir')
                 MessageBox(None, 'Wrong hash for files in wireshark dir', 'Error', 0)                                                                       
                 exit(1)            
