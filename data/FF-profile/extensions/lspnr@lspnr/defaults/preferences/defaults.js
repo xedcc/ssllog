@@ -59,3 +59,5 @@ pref("browser.cache.disk_cache_ssl", false);
 pref("network.http.use-cache", false);
 
 pref("browser.shell.checkDefaultBrowser", false);
+pref("startup.homepage_welcome_url", "");
+
