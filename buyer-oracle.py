@@ -387,31 +387,28 @@ def find_page(accno, amount, click_time):
     
     #if chars were not ascii, JS sent it to us in url-encoded unicode
     accno = urllib2.unquote(accno)
-    amount = urllib2.unquote(amount)
+    amount = urllib2.unquote(amount)  
+    click_time_formatted = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(click_time)))
     
-    filelist = os.listdir(logdir)
-    timestamps = []
-    #We're only concerned with files which were create AFTER the user marked the page
-    for f in filelist:
-        #TODO: unlike Windows, on Unix ctime is NOT creation time, so we use access time (time of last read or write)
-        #http://unix.stackexchange.com/questions/24441/get-file-created-creation-time
-        if OS=='win':   ctime = int(os.path.getctime(os.path.join(logdir, f)))
-        if OS=='linux': ctime = int(os.path.getatime(os.path.join(logdir, f)))
-        if ctime < int(click_time): continue            
-        timestamps.append([f, ctime])
-    timestamps.sort(key=lambda x: x[1])
-    
-    print ('Total number of files to process:'+str(len(timestamps)), end='\r\n')
-    for index, timestamp in enumerate(timestamps):
-        print ('Processing file No:'+str(index), end='\r\n')
-        filename = timestamp[0]
-        output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html and http.response.code == 200', '-C', 'paysty','-o' , 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port), '-x'])
-        if output == '': continue
-        #multiple frames are dumped ascendingly.
-        frames = output.split('\n\nFrame (')
-        #the first element contains an empty string after splitting
-        if len(frames) > 2: frames.pop(0)
-        for frame in frames:
+    #try to find the HTML twice, maybe it hasn't finished loading yet
+    for i in range(2):
+        print ("Attempt no:"+ str(i+1) +" to find HTML in our trace")
+        time.sleep(5)
+        if os.path.isfile(os.path.join(logdir, 'merged')): os.remove(os.path.join(logdir, 'merged'))
+        filelist = os.listdir(logdir)
+        mergecap_args = [mergecap_exepath, '-w', 'merged'] + filelist
+        subprocess.call(mergecap_args, cwd=logdir)
+        time.sleep(1)
+        
+        output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http.content_type contains html and http.response.code == 200 and frame.time > "' + click_time_formatted + '"', '-C', 'paysty','-o' , 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port), '-x'])
+        
+        #we need source and desftination port so that we could later determine which acp file the stream belongs to
+        ports = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http.content_type contains html and http.response.code == 200 and frame.time > "' + click_time_formatted + '"', '-C', 'paysty','-o' , 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port), '-T', 'fields', '-e', 'tcp.srcport', '-e', 'tcp.dstport'])
+        
+        separator = re.compile('Frame ' + re.escape('(') + '[0-9]{2,7} bytes' + re.escape(')') + ':')
+        #ignore the first split element which is always an empty string
+        frames = re.split(separator, output)[1:]
+        for index,frame in enumerate(frames):
             html = get_html_from_asciidump(frame)
             if html == -1:
                 print ('Error processing ascii dump in file:'+filename, end='\r\n')
@@ -423,8 +420,13 @@ def find_page(accno, amount, click_time):
                 print ('Amount not found in HTML', end='\r\n')
                 continue
             html_hash = hashlib.md5(html).hexdigest()
-            return ['success', filename, len(frames)]
-    return ['Data not found in HTML']
+            #building an acp filename
+            port_list = ports.split()
+            sport = port_list[2*i]
+            dport = port_list[2*i+1]
+            filename = '127.0.0.1.'+dport+'-127.0.0.1.'+sport+'_1.acp'
+            return ['success', filename]
+        return ['Data not found in HTML']
 
 
 def extract_ssl_key(filename):
@@ -448,11 +450,12 @@ def extract_ssl_key(filename):
         
         #For the user's peace of mind make sure no other streams can be decrypted with this key. We already know it can't be :)
         #merge all files sans our file and check against the key
+        if os.path.isfile(os.path.join(logdir, 'merged')): os.remove(os.path.join(logdir, 'merged'))        
         filelist = os.listdir(logdir)
         filelist.remove(filename)
-        mergecap_args = [mergecap_exepath, '-w', 'merged'] + filelist
+        mergecap_args = [mergecap_exepath, '-w', 'merged_to_test_sslkey'] + filelist
         subprocess.call(mergecap_args, cwd=logdir)
-        output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http', '-o', 'ssl.keylog_file:'+ sslkey, '-C', 'paysty', '-o',  'http.ssl.port:'+str(random_ssh_port)])
+        output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, 'merged_to_test_sslkey'), '-Y', 'ssl and http', '-o', 'ssl.keylog_file:'+ sslkey, '-C', 'paysty', '-o',  'http.ssl.port:'+str(random_ssh_port)])
         if output != '':
             print ('The unthinkable happened. Our ssl key can decrypt another tcp stream', end='\r\n')
             return 'The unthinkable happened. Our ssl key can decrypt another tcp stream'
