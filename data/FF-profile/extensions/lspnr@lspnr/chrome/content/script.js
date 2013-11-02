@@ -5,7 +5,6 @@ var isCheckEscrowtraceResponded = false;
 var is_accno_entered = false;
 var is_sum_entered = false;
 var pressed_blue_once = false;
-var was_clearcache_called = false;
 var consoleService;
 var prefs;
 var port;
@@ -36,6 +35,52 @@ if (first_window === "true" ) {
 //Simply send a HEAD request to the python backend to 127.0.0.1:2222/blabla. Backend treats "/blabla" not as a path but as an API call
 //Backend responds with HTTP headers "response":"blabla" and "value":<value from backend>
 function pageMarked(){
+	//the time is used to look only in those TCP streams which were created after ssl clear cache
+	var d = new Date();
+	var time_int = (d.getTime() / 1000) - 1;
+	var time_str = time_int.toString().split(".")[0];
+	clearSSLCache();
+
+	//reload the page and notify when DOM is loaded. 
+	//TODO maybe we should use "load" event instead, but it was not triggering when I tested it
+	var wm = Components.classes["@mozilla.org/appshell/window-mediator;1"] .getService(Components.interfaces.nsIWindowMediator);
+	var mainWindow = wm.getMostRecentWindow("navigator:browser");
+	var tabbrowser = mainWindow.gBrowser;
+	tabbrowser.addEventListener ("DOMContentLoaded", function loaded(event) { 
+
+		tabbrowser.removeEventListener("DOMContentLoaded", loaded, false);
+		var textbox_sum = document.getElementById("textbox_sum");
+		var textbox_accno = document.getElementById("textbox_accno");
+		var accno_str = textbox_accno.value;
+		var sum_str = textbox_sum.value;
+		var request_str = "http://127.0.0.1:"+port+"/page_marked";
+		//Check if we are testing. In production mode, accno and sum are known in advance of opening FF
+		if (accno_str){
+			request_str += "?accno=";
+			request_str += accno_str;
+			request_str += "&sum=";
+			request_str += sum_str;
+			request_str += "&time=";
+			request_str += time_str;
+		}
+		
+		reqPageMarked = new XMLHttpRequest();
+		reqPageMarked.onload = responsePageMarked;
+		reqPageMarked.open("HEAD", request_str, true);
+		reqPageMarked.send();
+
+		log("Finding HTML in our data");
+		log_toolbar("Finding HTML in our data");
+		isPageMarkedResponded = false;
+		setTimeout(responsePageMarked, 1000, 0);
+
+		//the user may want to log out, we don't want those pages in the escrow's trace
+		clearSSLCache();
+
+	}, false);
+
+	tabbrowser.reload();
+
 	var button_blue = document.getElementById("button_blue");
 	var button_grey1 = document.getElementById("button_grey1");
 	var textbox_sum = document.getElementById("textbox_sum");
@@ -57,32 +102,9 @@ function pageMarked(){
 		textbox_accno.disabled = true;
 		pressed_blue_once=true;
 	}
-	var accno_str = textbox_accno.value;
-	var sum_str = textbox_sum.value;
-	var request_str = "http://127.0.0.1:"+port+"/page_marked";
-	//Check if we are testing. In production mode, accno and sum are known in advance of opening FF
-	if (accno_str){
-		request_str += "?accno=";
-		request_str += accno_str;
-		request_str += "&sum=";
-		request_str += sum_str;
-	}
-	if (was_clearcache_called){
-		request_str += "&was_clearcache_called=yes";
-	}
-	else{
-		request_str += "&was_clearcache_called=no";
-	}
-	
-	reqPageMarked = new XMLHttpRequest();
-	reqPageMarked.onload = responsePageMarked;
-	reqPageMarked.open("HEAD", request_str, true);
-	reqPageMarked.send();
 
-	log("Finding HTML in our data");
-	log_toolbar("Finding HTML in our data");
-	isPageMarkedResponded = false;
-	setTimeout(responsePageMarked, 1000, 0);
+	log("Waiting for page data to reload");
+	log_toolbar("Waiting for page data to reload");
 }
 
 //backend responds to page_marked with either "success" ot "clear_ssl_cache"
@@ -107,13 +129,6 @@ function responsePageMarked (iteration) {
 		log("SUCCESS finding HTML in our data");
 		log_toolbar("SUCCESS finding HTML in our data");
 		setTimeout(checkEscrowtrace, 1000);
-	}
-	else if (value == "clear_ssl_cache") {
-		//var yellow_button = document.getElementById("button_yellow");
-		//yellow_button.hidden = false
-		clearSSLCache();
-		log("Please refresh this page and press the blue button again");
-		log_toolbar("Please refresh this page and press the blue button again");
 	}
 	else if (value == "failure") {
 		log("FAILURE finding HTML. Please let the developers know");
@@ -214,16 +229,8 @@ function sum_input() {
 }
 
 function clearSSLCache() {
- //    var button_yellow = document.getElementById("button_yellow");
- //    var button_grey2 = document.getElementById("button_grey2");
-	// button_yellow.hidden = true
-	// button_grey2.hidden = false
-	Components.classes["@mozilla.org/security/sdr;1"].getService(Components.interfaces.nsISecretDecoderRing).logoutAndTeardown();
-	was_clearcache_called = true;
-	var button_blue = document.getElementById("button_blue");
-	var button_grey1 = document.getElementById("button_grey1");
-	button_grey1.hidden = true;
-	button_blue.hidden = false;
+	var sdr = Components.classes["@mozilla.org/security/sdr;1"].getService(Components.interfaces.nsISecretDecoderRing);
+	sdr.logoutAndTeardown();
 }
 
 

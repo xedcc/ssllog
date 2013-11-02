@@ -122,8 +122,8 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
                 global sum_
                 accno = params[0]['accno']
                 sum_ = params[1]['sum']
-                was_clear_cache_called = params[2]['was_clearcache_called']
-            result = find_page(accno, sum_)
+                click_time = params[2]['time']
+            result = find_page(accno, sum_, click_time)
             if result[0] != 'success':
                 if is_ssh_session_active:
                     os.kill(stcppipe_proc.pid, signal.SIGTERM)
@@ -136,15 +136,7 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
                 self.send_header("value", "failure")
                 self.end_headers()
                 return
-            #else
-            filename, frames_no = result[1:3]
-            if is_clear_cache_needed(filename, frames_no, first_time=True if was_clear_cache_called == 'no' else False):    
-                self.send_response(200)
-                self.send_header("response", "page_marked")
-                self.send_header("value", "clear_ssl_cache")
-                print ('sending clear_ssl_cache',end='\r\n')
-                self.end_headers()
-                return
+            filename = result[1]
             #else
             retval = extract_ssl_key(filename)
             if retval != 'success':
@@ -293,11 +285,20 @@ def decrypt_escrowtrace():
     if output == '': 
         ssh_proc.stdin.write('exit failure\n')    
         return "Failed to find HTML in escrowtrace"
-    html = get_html_from_asciidump(output)
-    if html == -1:
-        ssh_proc.stdin.write('exit failure\n')            
-        return "Failed to find HTML in ascii dump"
-    if html_hash != hashlib.md5(html).hexdigest() :
+    frames = output.split('\n\nFrame (')
+    #the first element contains an empty string after splitting
+    if len(frames) > 2: frames.pop(0)
+    #we expect more than one HTML page in a TCP stream
+    was_match_found = False
+    for frame in frames:    
+        html = get_html_from_asciidump(output)
+        if html == -1:
+            ssh_proc.stdin.write('exit failure\n')            
+            return "Failed to find HTML in ascii dump"
+        if html_hash == hashlib.md5(html).hexdigest() :
+            was_match_found = True
+            break
+    if not was_match_found:
         ssh_proc.stdin.write('exit failure\n')            
         return "Escrowtrace's HTML doesn't match ours"
     
@@ -380,7 +381,7 @@ def get_html_from_asciidump(ascii_dump):
                 break
         return binary_html.split('\r\n\r\n', 1)[1]
    
-def find_page(accno, amount):
+def find_page(accno, amount, click_time):
     global random_ssh_port
     global html_hash
     
@@ -390,9 +391,15 @@ def find_page(accno, amount):
     
     filelist = os.listdir(logdir)
     timestamps = []
+    #We're only concerned with files which were create AFTER the user marked the page
     for f in filelist:
-        timestamps.append([f, os.path.getmtime(os.path.join(logdir, f))])
-    timestamps.sort(key=lambda x: x[1], reverse=True)
+        #TODO: unlike Windows, on Unix ctime is NOT creation time, so we use access time (time of last read or write)
+        #http://unix.stackexchange.com/questions/24441/get-file-created-creation-time
+        if OS=='win':   ctime = int(os.path.getctime(os.path.join(logdir, f)))
+        if OS=='linux': ctime = int(os.path.getatime(os.path.join(logdir, f)))
+        if ctime < int(click_time): continue            
+        timestamps.append([f, ctime])
+    timestamps.sort(key=lambda x: x[1])
     
     print ('Total number of files to process:'+str(len(timestamps)), end='\r\n')
     for index, timestamp in enumerate(timestamps):
@@ -400,11 +407,10 @@ def find_page(accno, amount):
         filename = timestamp[0]
         output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html and http.response.code == 200', '-C', 'paysty','-o' , 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port), '-x'])
         if output == '': continue
-        #multiple frames are dumped ascendingly. Process from the latest to the earlier.
+        #multiple frames are dumped ascendingly.
         frames = output.split('\n\nFrame (')
         #the first element contains an empty string after splitting
         if len(frames) > 2: frames.pop(0)
-        frames.reverse()
         for frame in frames:
             html = get_html_from_asciidump(frame)
             if html == -1:
@@ -419,20 +425,6 @@ def find_page(accno, amount):
             html_hash = hashlib.md5(html).hexdigest()
             return ['success', filename, len(frames)]
     return ['Data not found in HTML']
-
-
-#make sure there is no unwanted data (other HTML or POSTs) in that file/TCP stream
-#after the first sslclearcache it is OK to have POSTs because we know for sure that they don't contain logins/passwords
-def is_clear_cache_needed(filename, frames_no, first_time=False):
-    if frames_no > 1:
-        print ('Extra HTML file found in the TCP stream', end='\r\n')
-        return True
-    if first_time:
-        output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.request.method==POST', '-o', 'ssl.keylog_file:'+ sslkeylog, '-C', 'paysty', '-o', 'http.ssl.port:'+str(random_ssh_port)])
-        if output != '':
-            print ('POST request found in the TCP stream', end='\r\n')
-            return True
-        return False
 
 
 def extract_ssl_key(filename):
