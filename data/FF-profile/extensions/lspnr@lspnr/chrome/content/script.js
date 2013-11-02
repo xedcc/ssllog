@@ -34,21 +34,22 @@ if (first_window === "true" ) {
 
 
 //copied from https://developer.mozilla.org/en-US/docs/Code_snippets/Progress_Listeners
-const STATE_START = Ci.nsIWebProgressListener.STATE_START;
 const STATE_STOP = Ci.nsIWebProgressListener.STATE_STOP;
+const STATE_IS_WINDOW = Ci.nsIWebProgressListener.STATE_IS_WINDOW;
+
 var loadListener = {
     QueryInterface: XPCOMUtils.generateQI(["nsIWebProgressListener",
                                            "nsISupportsWeakReference"]),
 
     onStateChange: function(aWebProgress, aRequest, aFlag, aStatus) {
-        if (aFlag & STATE_START) {}
-        if (aFlag & STATE_STOP) {
+    	//borrowed from http://stackoverflow.com/questions/6574681/accessing-every-document-that-a-user-currently-views-from-an-extension
+        if ((aFlag & STATE_STOP) && (aFlag & STATE_IS_WINDOW) && (aWebProgress.DOMWindow == aWebProgress.DOMWindow.top)) {
             // This fires when the load finishes
-            //the user may want to log out, we don't want those pages in the escrow's trace
-			clearSSLCache();
 			var wm = Components.classes["@mozilla.org/appshell/window-mediator;1"] .getService(Components.interfaces.nsIWindowMediator);
 			wm.getMostRecentWindow("navigator:browser").gBrowser.removeProgressListener(this);
 			sendPageMarkedToBackend();
+			//the user may want to log out, we don't want those pages in the escrow's trace
+			clearSSLCache();
         }
     },
     onLocationChange: function(aProgress, aRequest, aURI) {},
