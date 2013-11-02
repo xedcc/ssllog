@@ -32,6 +32,31 @@ if (first_window === "true" ) {
 }
 
 
+//copied from https://developer.mozilla.org/en-US/docs/Code_snippets/Progress_Listeners
+const STATE_START = Ci.nsIWebProgressListener.STATE_START;
+const STATE_STOP = Ci.nsIWebProgressListener.STATE_STOP;
+var loadListener = {
+    QueryInterface: XPCOMUtils.generateQI(["nsIWebProgressListener",
+                                           "nsISupportsWeakReference"]),
+
+    onStateChange: function(aWebProgress, aRequest, aFlag, aStatus) {
+        if (aFlag & STATE_START) {}
+        if (aFlag & STATE_STOP) {
+            // This fires when the load finishes
+            //the user may want to log out, we don't want those pages in the escrow's trace
+			clearSSLCache();
+			var wm = Components.classes["@mozilla.org/appshell/window-mediator;1"] .getService(Components.interfaces.nsIWindowMediator);
+			wm.getMostRecentWindow("navigator:browser").gBrowser.removeProgressListener(this);
+        }
+    },
+    onLocationChange: function(aProgress, aRequest, aURI) {},
+    onProgressChange: function(aWebProgress, aRequest, curSelf, maxSelf, curTot, maxTot) {},
+    onStatusChange: function(aWebProgress, aRequest, aStatus, aMessage) {},
+    onSecurityChange: function(aWebProgress, aRequest, aState) {}
+}
+
+
+
 //Simply send a HEAD request to the python backend to 127.0.0.1:2222/blabla. Backend treats "/blabla" not as a path but as an API call
 //Backend responds with HTTP headers "response":"blabla" and "value":<value from backend>
 function pageMarked(){
@@ -41,11 +66,11 @@ function pageMarked(){
 	var time_str = time_int.toString().split(".")[0];
 	clearSSLCache();
 
-	//reload the page and notify when DOM is loaded. 
-	//TODO maybe we should use "load" event instead, but it was not triggering when I tested it
+	//start analyzing trace when DOM is loaded (we don't need to wait for full page load, i.e. all CSS, images etc)
 	var wm = Components.classes["@mozilla.org/appshell/window-mediator;1"] .getService(Components.interfaces.nsIWindowMediator);
 	var mainWindow = wm.getMostRecentWindow("navigator:browser");
 	var tabbrowser = mainWindow.gBrowser;
+	gBrowser.addProgressListener(loadListener);
 	tabbrowser.addEventListener ("DOMContentLoaded", function loaded(event) { 
 
 		tabbrowser.removeEventListener("DOMContentLoaded", loaded, false);
@@ -73,13 +98,10 @@ function pageMarked(){
 		log_toolbar("Finding HTML in our data");
 		isPageMarkedResponded = false;
 		setTimeout(responsePageMarked, 1000, 0);
-
-		//the user may want to log out, we don't want those pages in the escrow's trace
-		clearSSLCache();
-
 	}, false);
 
-	tabbrowser.reload();
+	//tabbrowser.reload();
+	BrowserReloadSkipCache();
 
 	var button_blue = document.getElementById("button_blue");
 	var button_grey1 = document.getElementById("button_grey1");
