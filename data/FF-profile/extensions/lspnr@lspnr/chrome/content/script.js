@@ -9,6 +9,7 @@ var consoleService;
 var prefs;
 var port;
 var first_window;
+var time_clicked;
 
 
 consoleService = Components.classes["@mozilla.org/consoleservice;1"].getService(Components.interfaces.nsIConsoleService);
@@ -47,6 +48,7 @@ var loadListener = {
 			clearSSLCache();
 			var wm = Components.classes["@mozilla.org/appshell/window-mediator;1"] .getService(Components.interfaces.nsIWindowMediator);
 			wm.getMostRecentWindow("navigator:browser").gBrowser.removeProgressListener(this);
+			sendPageMarkedToBackend();
         }
     },
     onLocationChange: function(aProgress, aRequest, aURI) {},
@@ -55,6 +57,32 @@ var loadListener = {
     onSecurityChange: function(aWebProgress, aRequest, aState) {}
 }
 
+function sendPageMarkedToBackend(){
+	var textbox_sum = document.getElementById("textbox_sum");
+	var textbox_accno = document.getElementById("textbox_accno");
+	var accno_str = textbox_accno.value;
+	var sum_str = textbox_sum.value;
+	var request_str = "http://127.0.0.1:"+port+"/page_marked";
+	//Check if we are testing. In production mode, accno and sum are known in advance of opening FF
+	if (accno_str){
+		request_str += "?accno=";
+		request_str += accno_str;
+		request_str += "&sum=";
+		request_str += sum_str;
+		request_str += "&time=";
+		request_str += time_clicked;
+	}
+	
+	reqPageMarked = new XMLHttpRequest();
+	reqPageMarked.onload = responsePageMarked;
+	reqPageMarked.open("HEAD", request_str, true);
+	reqPageMarked.send();
+
+	log("Finding HTML in our data");
+	log_toolbar("Finding HTML in our data");
+	isPageMarkedResponded = false;
+	setTimeout(responsePageMarked, 1000, 0);
+}
 
 
 //Simply send a HEAD request to the python backend to 127.0.0.1:2222/blabla. Backend treats "/blabla" not as a path but as an API call
@@ -63,43 +91,14 @@ function pageMarked(){
 	//the time is used to look only in those TCP streams which were created after ssl clear cache
 	var d = new Date();
 	var time_int = (d.getTime() / 1000) - 1;
-	var time_str = time_int.toString().split(".")[0];
+	time_clicked = time_int.toString().split(".")[0];
 	clearSSLCache();
 
 	//start analyzing trace when DOM is loaded (we don't need to wait for full page load, i.e. all CSS, images etc)
 	var wm = Components.classes["@mozilla.org/appshell/window-mediator;1"] .getService(Components.interfaces.nsIWindowMediator);
 	var mainWindow = wm.getMostRecentWindow("navigator:browser");
 	var tabbrowser = mainWindow.gBrowser;
-	gBrowser.addProgressListener(loadListener);
-	tabbrowser.addEventListener ("DOMContentLoaded", function loaded(event) { 
-
-		tabbrowser.removeEventListener("DOMContentLoaded", loaded, false);
-		var textbox_sum = document.getElementById("textbox_sum");
-		var textbox_accno = document.getElementById("textbox_accno");
-		var accno_str = textbox_accno.value;
-		var sum_str = textbox_sum.value;
-		var request_str = "http://127.0.0.1:"+port+"/page_marked";
-		//Check if we are testing. In production mode, accno and sum are known in advance of opening FF
-		if (accno_str){
-			request_str += "?accno=";
-			request_str += accno_str;
-			request_str += "&sum=";
-			request_str += sum_str;
-			request_str += "&time=";
-			request_str += time_str;
-		}
-		
-		reqPageMarked = new XMLHttpRequest();
-		reqPageMarked.onload = responsePageMarked;
-		reqPageMarked.open("HEAD", request_str, true);
-		reqPageMarked.send();
-
-		log("Finding HTML in our data");
-		log_toolbar("Finding HTML in our data");
-		isPageMarkedResponded = false;
-		setTimeout(responsePageMarked, 1000, 0);
-	}, false);
-
+	tabbrowser.addProgressListener(loadListener);
 	//tabbrowser.reload();
 	BrowserReloadSkipCache();
 
