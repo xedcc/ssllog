@@ -437,7 +437,7 @@ def extract_ssl_key(filename, click_time):
     sslkey_fd = open(sslkeylog, 'r')
     keys_data = sslkey_fd.read()
     sslkey_fd.close()
-    keys = keys_data.rstrip().split('\n')
+    keys = keys_orig = keys_data.rstrip().split('\n')
     keys.reverse()
     print ('SSL keys needed to be processed:' + str(len(keys)), end='\r\n')
     is_key_found = False
@@ -456,13 +456,15 @@ def extract_ssl_key(filename, click_time):
         print ('FAILURE could not find ssl key', end='\r\n')
         return 'FAILURE could not find ssl key'        
         
-    #put into sslkey all other lines with the same master secret
+    #put into sslkey all lines folowing the first master secret
+    
     master_secret = key.split()[2]
+    #find index of the first occurence of master secret in sslkeylog
+    first_index = min(i for i,line in enumerate(keys_orig) if master_secret in line)
     tmpkey_fd = open(sslkey, 'w')
-    for key in keys:
-        if key.count(master_secret) == 1:
-            tmpkey_fd.write(key+'\n')
-            tmpkey_fd.flush()                
+    for key in keys_orig[first_index:]:            
+        tmpkey_fd.write(key+'\n')
+        tmpkey_fd.flush()                
     tmpkey_fd.close()
               
     print ('SUCCESS unique ssl key found', end='\r\n')
