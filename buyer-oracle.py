@@ -437,7 +437,8 @@ def extract_ssl_key(filename, click_time):
     sslkey_fd = open(sslkeylog, 'r')
     keys_data = sslkey_fd.read()
     sslkey_fd.close()
-    keys = keys_orig = keys_data.rstrip().split('\n')
+    keys = keys_data.rstrip().split('\n')
+    keys_orig = keys_data.rstrip().split('\n')
     keys.reverse()
     print ('SSL keys needed to be processed:' + str(len(keys)), end='\r\n')
     is_key_found = False
