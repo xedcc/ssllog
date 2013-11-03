@@ -285,13 +285,15 @@ def decrypt_escrowtrace():
     if output == '': 
         ssh_proc.stdin.write('exit failure\n')    
         return "Failed to find HTML in escrowtrace"
-    frames = output.split('\n\nFrame (')
-    #the first element contains an empty string after splitting
-    if len(frames) > 2: frames.pop(0)
+    
+    separator = re.compile('Frame ' + re.escape('(') + '[0-9]{2,7} bytes' + re.escape(')') + ':')
+    #ignore the first split element which is always an empty string
+    frames = re.split(separator, output)[1:]   
+    
     #we expect more than one HTML page in a TCP stream
     was_match_found = False
     for frame in frames:    
-        html = get_html_from_asciidump(output)
+        html = get_html_from_asciidump(frame)
         if html == -1:
             ssh_proc.stdin.write('exit failure\n')            
             return "Failed to find HTML in ascii dump"
