@@ -137,8 +137,9 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
                 self.end_headers()
                 return
             filename = result[1]
+            click_time = result[2]
             #else
-            retval = extract_ssl_key(filename)
+            retval = extract_ssl_key(filename, click_time)
             if retval != 'success':
                 if is_ssh_session_active: 
                     os.kill(stcppipe_proc.pid, signal.SIGTERM)
@@ -402,7 +403,7 @@ def find_page(accno, amount, click_time):
         subprocess.call(mergecap_args, cwd=logdir)
         time.sleep(1)
         
-        output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http.content_type contains html and http.response.code == 200 and frame.time > "' + click_time_formatted + '"', '-C', 'paysty','-o' , 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port), '-x'])
+        output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http.content_type contains html and http.response.code == 200 and frame.time > "' + click_time_formatted + '"', '-C', 'paysty', '-o', 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port), '-x'])
         
         #we need source and desftination port so that we could later determine which acp file the stream belongs to
         ports = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http.content_type contains html and http.response.code == 200 and frame.time > "' + click_time_formatted + '"', '-C', 'paysty','-o' , 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port), '-T', 'fields', '-e', 'tcp.srcport', '-e', 'tcp.dstport'])
@@ -427,11 +428,11 @@ def find_page(accno, amount, click_time):
             sport = port_list[2*i]
             dport = port_list[2*i+1]
             filename = '127.0.0.1.'+dport+'-127.0.0.1.'+sport+'_1.acp'
-            return ['success', filename]
-        return ['Data not found in HTML']
+            return ['success', filename, click_time_formatted]
+    return ['Data not found in HTML']
 
 
-def extract_ssl_key(filename):
+def extract_ssl_key(filename, click_time):
     #find the key which decrypts out tcp stream
     sslkey_fd = open(sslkeylog, 'r')
     keys_data = sslkey_fd.read()
@@ -439,6 +440,7 @@ def extract_ssl_key(filename):
     keys = keys_data.rstrip().split('\n')
     keys.reverse()
     print ('SSL keys needed to be processed:' + str(len(keys)), end='\r\n')
+    is_key_found = False
     for index,key in enumerate(keys):
         print ('Processing key number:' + str(index), end='\r\n')
         if not key.startswith('CLIENT_RANDOM'): continue
@@ -446,27 +448,27 @@ def extract_ssl_key(filename):
         tmpkey_fd.write(key+'\n')
         tmpkey_fd.flush()
         tmpkey_fd.close()
-        output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html', '-o', 'ssl.keylog_file:'+ sslkey, '-C', 'paysty', '-o', 'http.ssl.port:'+str(random_ssh_port)])
-        if output == '': continue        
-        #else key found
+        output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html and frame.time > "' + click_time + '"', '-o', 'ssl.keylog_file:'+ sslkey, '-C', 'paysty', '-o', 'http.ssl.port:'+str(random_ssh_port)])
+        if output == '': continue
+        is_key_found = True
+        break
+    if not is_key_found:
+        print ('FAILURE could not find ssl key', end='\r\n')
+        return 'FAILURE could not find ssl key'        
         
-        #For the user's peace of mind make sure no other streams can be decrypted with this key. We already know it can't be :)
-        #merge all files sans our file and check against the key
-        if os.path.isfile(os.path.join(logdir, 'merged')): os.remove(os.path.join(logdir, 'merged'))        
-        filelist = os.listdir(logdir)
-        filelist.remove(filename)
-        mergecap_args = [mergecap_exepath, '-w', 'merged_to_test_sslkey'] + filelist
-        subprocess.call(mergecap_args, cwd=logdir)
-        output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, 'merged_to_test_sslkey'), '-Y', 'ssl and http', '-o', 'ssl.keylog_file:'+ sslkey, '-C', 'paysty', '-o',  'http.ssl.port:'+str(random_ssh_port)])
-        if output != '':
-            print ('The unthinkable happened. Our ssl key can decrypt another tcp stream', end='\r\n')
-            return 'The unthinkable happened. Our ssl key can decrypt another tcp stream'
-            
-        print ('SUCCESS unique ssl key found', end='\r\n')
-        return 'success'
+    #put into sslkey all other lines with the same master secret
+    master_secret = key.split()[2]
+    tmpkey_fd = open(sslkey, 'w')
+    for key in keys:
+        if key.count(master_secret) == 1:
+            tmpkey_fd.write(key+'\n')
+            tmpkey_fd.flush()                
+    tmpkey_fd.close()
+              
+    print ('SUCCESS unique ssl key found', end='\r\n')
+    return 'success'
         
-    print ('FAILURE could not find ssl key', end='\r\n')
-    return 'FAILURE could not find ssl key'
+    
     
     
 #use miniHTTP server to receive commands from Firefox addon and respond to them
