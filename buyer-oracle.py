@@ -378,8 +378,8 @@ def find_page(accno, amount, click_time):
     global html_hash
     
     #if chars were not ascii, FF extension sent it to us in url-encoded unicode
-    accno = urllib2.unquote(accno)
-    amount = urllib2.unquote(amount)  
+    accno = urllib2.unquote(accno).strip()
+    amount = urllib2.unquote(amount).strip()
     click_time_formatted = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(click_time)))
     
     #try to find the HTML twice, becauce sometimes FF reports that page finished loading when in fact it hasn't
