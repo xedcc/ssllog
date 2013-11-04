@@ -30,18 +30,17 @@ import zipfile
 
 TESTING = False
 #ALPHA_TESTING means the users have to enter accno and sum themselves via FF addon
+#whereas in a production environment these values will be sourced from the contract between buyer and seller
 ALPHA_TESTING = True
 
 installdir = os.path.dirname(os.path.realpath(__file__))
 platform = platform.system()
 if platform == 'Windows':
     OS = 'win'
-    #rsa needed for key conversion
+    #rsa module for ssh2 to putty's ppk format conversion
     import rsa
 elif platform == 'Linux':OS = 'linux'
     
-
-
 datadir = os.path.join(installdir, "data")
 logdir = os.path.join(datadir, 'stcppipe_buyerlog')
 sslkeylog = os.path.join(datadir, 'sslkeylog')
@@ -49,7 +48,6 @@ sslkey = os.path.join(datadir, 'sslkey')
 ssh_logfile = os.path.join(datadir, 'ssh.log')
 alphatest_key = os.path.join(installdir, 'alphatest.txt')
 alphatest_ppk = os.path.join(installdir, 'alphatest.ppk')
-
 
 
 if OS=='win':
@@ -65,22 +63,24 @@ if OS=='linux':
 firefox_exepath = 'firefox'
 ssh_exepath = 'ssh'
 
-
+#local port for ssh's port forwarding. Will be randomly chosen upon starting the tunnel
 random_ssh_port = 0
 #random TCP port on which firefox extension communicates with python backend
 FF_to_backend_port = 0
-#random port which FF uses as proxy port. Stcppipe listens on this port
+#random port which FF uses as proxy port. Local stcppipe listens on this port and forwards traffic to random_ssh_port
 FF_proxy_port = 0
+#ID of a public snapshot on Amazon EC2. How this snapshot was created is outlined in oracle/INSTALL
 oracle_snapID = 'snap-d4741ed0'
 
 accno = None
 sum_ = None
+#subprocess Objects
 stcppipe_proc = ssh_proc = None
 html_hash = None
+#the remote port on oracle for ssh port forwarding. By default it is 2134 and gets re-assigned on first connection to oracle
 assigned_port = None
 username = "ubuntu"
 is_ff_started = False
-is_tk_destroyed = False
 is_ssh_session_active = False
 
 #a thread which returns a value. This is achieved by passing self as the first argument to a called function
@@ -100,19 +100,19 @@ class StoppableHttpServer (BaseHTTPServer.HTTPServer):
                 self.handle_request()
         return self.retval;
     
-#handle only paths we are interested and let python handle the response headers
-#class "object" is needed to access super()
+
+#Receive HTTP HEAD requests from FF extension. This is how the extension communicates with python backend.
 class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
     protocol_version = "HTTP/1.1"      
     
-    #Firefox addon speaks with HEAD
     def do_HEAD(self):
         global ssh_proc
         global stcppipe_proc
         global is_ssh_session_active        
         print ('minihttp received ' + self.path + ' request',end='\r\n')
-        # example HEAD string "/page_marked?accno=12435678&sum=1234.56"        
+        # example HEAD string "/page_marked?accno=12435678&sum=1234.56&time=1383389835"        
         if self.path.startswith('/page_marked'):
+            #the buyer has selected a page which he wants the escrow to see
             if ALPHA_TESTING:
                 params = []
                 for param_str in self.path.split('?')[1].split('&'):
@@ -242,19 +242,14 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
             self.end_headers()
             return                
     
-#ALPHA only - fetch the tarball; make sure HTML decrypts
-def decrypt_escrowtrace():
-    global ssh_proc
-    global random_ssh_port
-    global assigned_port
-    global html_hash
-    global datadir
-    
+#ALPHA only - fetch the tarball from the oracle, which in production env. the escrow would fetch
+#make sure the escrow would find the HTML page in the trace
+def decrypt_escrowtrace():    
     escrowtracedir = os.path.join(datadir, "escrowtrace")
     ssh_proc.stdin.write('sslkey \n')
-    #give oracle some time to create the tarball and launch an httpd
+    #give oracle some time to create the tarball and launch an httpd which waits to serve the tarball
     time.sleep(5)
-    #send request to ssh's local forwarding port
+    #send request to ssh's local forwarding port which gets forwarded to oracle's remote port
     try:
         oracle_url = urllib2.urlopen("http://127.0.0.1:"+str(random_ssh_port)+"/the/name/doesnt/matter/because/the/oracle/will/serve/the/correct/file/anyway", timeout=30)
     except:
@@ -270,8 +265,7 @@ def decrypt_escrowtrace():
     tar_object = tarfile.open(os.path.join(datadir, "escrowtrace.tar"))
     tar_object.extractall(escrowtracedir)
     tar_object.close()
-    
-    
+      
     filelist = os.listdir(escrowtracedir)
     mergecap_args = [mergecap_exepath, '-w', 'merged'] + filelist
     #it was observed that mergecap may return before the output file was written entirely. We must give the OS some time to flush everything to disk:
@@ -282,16 +276,17 @@ def decrypt_escrowtrace():
         ssh_proc.stdin.write('exit failure\n')
         print ('Mergecap error',  end='\r\n')
         return 'Mergecap error'
+    #hard-coded port 3128 is squid's port on oracle
     output = subprocess.check_output([tshark_exepath, '-r', os.path.join(escrowtracedir, 'merged'), '-Y', 'ssl and http.content_type contains html', '-C', 'paysty', '-o', 'ssl.keylog_file:'+ sslkey, '-o',  'http.ssl.port:3128', '-x'])
     if output == '': 
         ssh_proc.stdin.write('exit failure\n')    
         return "Failed to find HTML in escrowtrace"
     
+    #output may contain multiple frames with HTML, we examine them one-by-one
     separator = re.compile('Frame ' + re.escape('(') + '[0-9]{2,7} bytes' + re.escape(')') + ':')
     #ignore the first split element which is always an empty string
     frames = re.split(separator, output)[1:]   
     
-    #we expect more than one HTML page in a TCP stream
     was_match_found = False
     for frame in frames:    
         html = get_html_from_asciidump(frame)
@@ -309,11 +304,8 @@ def decrypt_escrowtrace():
     return "success"
     
     
-    
-    
-    
 
-#look at tshark's ascii dump to better understand the parsing taking place
+#look at tshark's ascii dump (option '-x') to better understand the parsing taking place
 def get_html_from_asciidump(ascii_dump):
     hexdigits = set('0123456789abcdefABCDEF')
     binary_html = bytearray()
@@ -336,6 +328,7 @@ def get_html_from_asciidump(ascii_dump):
                 m_array = bytearray.fromhex(line[6:54])
                 binary_html += m_array
             else:
+                #if first 4 chars are not hexdigits, we reached the end of the section
                 break
         return binary_html
     
@@ -343,8 +336,6 @@ def get_html_from_asciidump(ascii_dump):
     dechunked_pos = ascii_dump.rfind('De-chunked entity body')
     if dechunked_pos != -1:
         for line in ascii_dump[dechunked_pos:].split('\n')[1:]:
-            #convert ascii representation of hex into binary
-            #only deal with lines where first 4 chars are hexdigits
             if all(c in hexdigits for c in line [:4]):
                 m_array = bytearray.fromhex(line[6:54])
                 binary_html += m_array
@@ -356,8 +347,6 @@ def get_html_from_asciidump(ascii_dump):
     reassembled_pos = ascii_dump.rfind('Reassembled SSL')
     if reassembled_pos != -1:
         for line in ascii_dump[reassembled_pos:].split('\n')[1:]:
-            #convert ascii representation of hex into binary
-            #only deal with lines where first 4 chars are hexdigits
             if all(c in hexdigits for c in line [:4]):
                 m_array = bytearray.fromhex(line[6:54])
                 binary_html += m_array
@@ -372,8 +361,6 @@ def get_html_from_asciidump(ascii_dump):
     decrypted_pos = ascii_dump.rfind('Decrypted SSL data')
     if decrypted_pos != -1:       
         for line in ascii_dump[decrypted_pos:].split('\n')[1:]:
-            #convert ascii representation of hex into binary
-            #only deal with lines where first 4 chars are hexdigits
             if all(c in hexdigits for c in line [:4]):
                 m_array = bytearray.fromhex(line[6:54])
                 binary_html += m_array
@@ -383,19 +370,22 @@ def get_html_from_asciidump(ascii_dump):
                     return -1
                 break
         return binary_html.split('\r\n\r\n', 1)[1]
-   
+
+#Examine the local trace of a banking session and find an HTML statement page containing account number and sum of payment 
+#click_time is the time when user click the button to mark the page whereupon Firefox cleared SSL cache and refreshed the page
+#We only search for HTML in packets AFTER click_time
 def find_page(accno, amount, click_time):
-    global random_ssh_port
     global html_hash
     
-    #if chars were not ascii, JS sent it to us in url-encoded unicode
+    #if chars were not ascii, FF extension sent it to us in url-encoded unicode
     accno = urllib2.unquote(accno)
     amount = urllib2.unquote(amount)  
     click_time_formatted = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(click_time)))
     
-    #try to find the HTML twice, maybe it hasn't finished loading yet
+    #try to find the HTML twice, becauce sometimes FF reports that page finished loading when in fact it hasn't
     for i in range(2):
         print ("Attempt no:"+ str(i+1) +" to find HTML in our trace")
+        #give some time for the page to finish loading completely
         time.sleep(5)
         if os.path.isfile(os.path.join(logdir, 'merged')): os.remove(os.path.join(logdir, 'merged'))
         filelist = os.listdir(logdir)
@@ -403,11 +393,13 @@ def find_page(accno, amount, click_time):
         subprocess.call(mergecap_args, cwd=logdir)
         time.sleep(1)
         
+        #find all HTML pages after click_time
         output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http.content_type contains html and http.response.code == 200 and frame.time > "' + click_time_formatted + '"', '-C', 'paysty', '-o', 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port), '-x'])
         
         #we need source and desftination port so that we could later determine which acp file the stream belongs to
         ports = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http.content_type contains html and http.response.code == 200 and frame.time > "' + click_time_formatted + '"', '-C', 'paysty','-o' , 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port), '-T', 'fields', '-e', 'tcp.srcport', '-e', 'tcp.dstport'])
         
+        #output may contain multiple frames with HTML, we examine them one-by-one        
         separator = re.compile('Frame ' + re.escape('(') + '[0-9]{2,7} bytes' + re.escape(')') + ':')
         #ignore the first split element which is always an empty string
         frames = re.split(separator, output)[1:]
@@ -422,6 +414,7 @@ def find_page(accno, amount, click_time):
             if html.find(amount) == -1:
                 print ('Amount not found in HTML', end='\r\n')
                 continue
+            #ALPHA only: save the hash to later compare to the hash of HTML found in escrow's trace
             html_hash = hashlib.md5(html).hexdigest()
             #building an acp filename
             port_list = ports.split()
@@ -431,36 +424,42 @@ def find_page(accno, amount, click_time):
             return ['success', filename, click_time_formatted]
     return ['Data not found in HTML']
 
-
+#get all those sslkeylog entries which were generated AFTER the user pressed the button to mark a page for escrow
+#The resulting file will be sent to escrow 
+#NB: The escrow will be able to ONLY decrypt pages which were displayed AFTER the user clicked the button
 def extract_ssl_key(filename, click_time):
-    #find the key which decrypts out tcp stream
     sslkey_fd = open(sslkeylog, 'r')
     keys_data = sslkey_fd.read()
     sslkey_fd.close()
+    #first copy will be reverse to speed up searching
     keys = keys_data.rstrip().split('\n')
+    keys.reverse()    
+    #second copy will remain untouched
     keys_orig = keys_data.rstrip().split('\n')
-    keys.reverse()
-    print ('SSL keys needed to be processed:' + str(len(keys)), end='\r\n')
+    
+    print ('SSL keys total in sslkeylogfile :' + str(len(keys)), end='\r\n')
     is_key_found = False
     for index,key in enumerate(keys):
-        print ('Processing key number:' + str(index), end='\r\n')
+        print ('Processing key number:' + str(index+1), end='\r\n')
         if not key.startswith('CLIENT_RANDOM'): continue
         tmpkey_fd = open(sslkey, 'w')
         tmpkey_fd.write(key+'\n')
         tmpkey_fd.flush()
         tmpkey_fd.close()
+        #check if this key can decrypt the HTML
         output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html and frame.time > "' + click_time + '"', '-o', 'ssl.keylog_file:'+ sslkey, '-C', 'paysty', '-o', 'http.ssl.port:'+str(random_ssh_port)])
         if output == '': continue
+        #else
         is_key_found = True
         break
     if not is_key_found:
         print ('FAILURE could not find ssl key', end='\r\n')
         return 'FAILURE could not find ssl key'        
         
-    #put into sslkey all lines folowing the first master secret
-    
     master_secret = key.split()[2]
-    #find index of the first occurence of master secret in sslkeylog
+    #find index of the first line containing the master secret (multiple lines may contain the same master secret but different CLIENT_RANDOM)
+    #This line was generated AFTER the user clicked the button
+    #It is safe to give escrow all the lines which follow
     first_index = min(i for i,line in enumerate(keys_orig) if master_secret in line)
     tmpkey_fd = open(sslkey, 'w')
     for key in keys_orig[first_index:]:            
@@ -468,12 +467,10 @@ def extract_ssl_key(filename, click_time):
         tmpkey_fd.flush()                
     tmpkey_fd.close()
               
-    print ('SUCCESS unique ssl key found', end='\r\n')
+    print ('SUCCESS ssl key found', end='\r\n')
     return 'success'
         
-    
-    
-    
+       
 #use miniHTTP server to receive commands from Firefox addon and respond to them
 def buyer_start_minihttp_thread(parentthread):
     global FF_to_backend_port
@@ -488,9 +485,7 @@ def buyer_start_minihttp_thread(parentthread):
     retval = httpd.serve_forever()
 
 
-def start_firefox():
-    global FF_to_backend_port 
-    
+def start_firefox():    
     if not os.path.isdir(os.path.join(datadir, 'firefox')): os.mkdir(os.path.join(datadir, 'firefox'))
     if not os.path.isfile(os.path.join(datadir, 'firefox', 'firefox.stdout')): open(os.path.join(datadir, 'firefox', 'firefox.stdout'), 'w').close()
     if not os.path.isfile(os.path.join(datadir, 'firefox', 'firefox.stderr')): open(os.path.join(datadir, 'firefox', 'firefox.stderr'), 'w').close()    
@@ -526,7 +521,7 @@ def start_firefox():
     #used to prevent addon's confusion when certain sites open new FF windows
     os.putenv("FF_first_window", "true")
     
-    print ("Starting a new instance of Firefox with a new profile",end='\r\n')
+    print ("Starting a new instance of Firefox with Paysty's profile",end='\r\n')
     try:
         ff_proc = subprocess.Popen([firefox_exepath,'-no-remote', '-profile', os.path.join(datadir, 'FF-profile')], stdout=open(os.path.join(datadir, 'firefox', "firefox.stdout"),'w'), stderr=open(os.path.join(datadir, 'firefox', "firefox.stderr"), 'w'))
     except Exception,e:
@@ -536,10 +531,8 @@ def start_firefox():
 
 
 
-
-
-
 #using AWS query API make sure oracle meets the criteria
+#the rationale behind these checks is addressed in oracle/INSTALL
 def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, DescribeVolumesURL, GetConsoleOutputURL, oracle_dns):
     try:
         di_url = urllib2.urlopen(DescribeInstancesURL)
@@ -647,6 +640,8 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
         print(e, end='\r\n')
         return 'bad data from Amazon'
     
+    #The ListMetrics criterion will only be used in production env. as it requires that the whole Amazon AWS account runs only the oracle
+    #and has no other volumes or instances
     if not ALPHA_TESTING:
         try:
             lm_url = urllib2.urlopen(ListMetricsURL)
@@ -662,7 +657,7 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
             for one_name in names:
                 if (one_name.firstChild.data == 'VolumeId' and one_name.parentNode.getElementsByTagName('Value')[0].firstChild.data != instance_volumeId) or (one_name.firstChild.data == 'InstanceId' and one_name.parentNode.getElementsByTagName('Value')[0].firstChild.data != instanceId):
                     print ('Too many volumes or instances detected', end='\r\n')
-                    #return 'bad oracle'
+                    return 'bad oracle'
         except Exception,e:
             print(e, end='\r\n')
             return 'bad data from Amazon'
@@ -697,6 +692,7 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
        
     return 'success'
 
+#aux function used in convert_key()
 def long_to_bytes(n):
     s = ''
     n = long(n)
@@ -714,6 +710,7 @@ def long_to_bytes(n):
     s = s[i:]
     return s
 
+#Convert the regular privkey file format into Putty's own PPK format
 #adapted from https://github.com/AdamISZ/ssllog/blob/master/userkeymgmt.py
 def convert_key():
     global alphatest_key
@@ -778,15 +775,16 @@ def enqueue_output(out, queue):
         queue.put(line)
     out.close()
     
-    
-#privkey_file should correspond to RSA public key registered on oracle
-#assigned_port should be provided by the escrow
+
+#Launch stcppipe and ssh in such a way that traffic from Firefox travels in this manner:
+#FF --> local stcppipe --> local ssh --> oracle sshd --> oracle stcppipe --> oracle squid --> bank
+
+#privkey server as a password in order to use the oracle and should be given to user by escrow
 def start_tunnel(privkey_file, oracle_address):
     global assigned_port
+    global random_ssh_port    
     global stcppipe_proc
     global ssh_proc
-    global username
-    global FF_proxy_port
     global is_ssh_session_active
     
     if not os.path.isfile(alphatest_key): return 'Please make sure alphatest.txt is in your installation directory'
@@ -799,7 +797,6 @@ def start_tunnel(privkey_file, oracle_address):
     if os.path.isdir(logdir) : shutil.rmtree(logdir)
     os.mkdir(logdir)
     
-    global random_ssh_port
     random_ssh_port = random.randint(1025,65535)
     stcppipe_proc = subprocess.Popen([stcppipe_exepath, '-d', logdir, '-b', '127.0.0.1', str(random_ssh_port), str(FF_proxy_port)])
     time.sleep(1)
@@ -849,12 +846,13 @@ def start_tunnel(privkey_file, oracle_address):
         if OS=='win':
             if cmd.startswith("connection."):
                 #only happens on first run plink is adding host keys to windows registry
-                #because of ths delay we may fail to make the 3 seconds window allowed to finish logging in
+                #because of this delay we may fail to make the 3 seconds window allowed to finish logging in
                 ssh_proc.stdin.write("y\r\n")
                 ssh_proc.stdin.flush()
                 first_run = True
                 continue
         if cmd.startswith('Session finished. Please reconnect and use port '):
+            #happens when the remote forwarding port on oracle is already in use
             newport = cmd[len('Session finished. Please reconnect and use port '):].split()[0]
             if len(newport) < 4 or len(newport)>5:
                 os.kill(stcppipe_proc.pid, signal.SIGTERM)
@@ -877,7 +875,6 @@ def start_tunnel(privkey_file, oracle_address):
     
     
 if __name__ == "__main__": 
-    #show small dialog. It will go away as soon as addon sends "started" signal to backend
     if OS=='win':
         MessageBox = ctypes.windll.user32.MessageBoxA        
          
@@ -1003,6 +1000,8 @@ if __name__ == "__main__":
             exit(1)
     
     #make sure tshark's default profile exists
+    #This profile contains factory defaults. We need it so that if user has his own wireshark installed
+    #his settings would not interfere with ours
     paysty_profile = None
     if OS=='win':   paysty_profile = os.path.join(os.getenv('appdata'), 'wireshark', 'profiles', 'paysty')
     if OS=='linux': paysty_profile = os.path.join(os.getenv('HOME'), '.wireshark', 'profiles', 'paysty')
@@ -1036,8 +1035,6 @@ if __name__ == "__main__":
     
     while True:
         time.sleep(1)
-        if (is_ff_started and not is_tk_destroyed):
-            is_tk_destroyed = True
         if ff_proc.poll() != None:
             #FF window was closed, shut down all subsystems and exit gracefully
             request = urllib2.Request("http://127.0.0.1:" +str(FF_to_backend_port)+ "/terminate")
