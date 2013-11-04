@@ -502,17 +502,18 @@ def start_firefox():
             if os.path.isfile(os.path.join(datadir, 'FF-profile', 'extensions.ini')):
                 ff_proc.kill()
                 break
-                    
-        #prevent FF from prompting the user to install extenxion
+            
         try:
-            mfile = codecs.open (os.path.join(datadir, 'FF-profile', 'extensions.ini'), "w")
+            #enable extension                            
+            with codecs.open (os.path.join(datadir, 'FF-profile', 'extensions.ini'), "w") as f1:
+                f1.write("[ExtensionDirs]\nExtension0=" + os.path.join(datadir, 'FF-profile', "extensions", "lspnr@lspnr") + "\n")
+            #show addon bar
+            with codecs.open(os.path.join(datadir, 'FF-profile', 'localstore.rdf'), 'w') as f2:
+                f2.write('<?xml version="1.0"?><RDF:RDF xmlns:NC="http://home.netscape.com/NC-rdf#" xmlns:RDF="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><RDF:Description RDF:about="chrome://browser/content/browser.xul"><NC:persist RDF:resource="chrome://browser/content/browser.xul#addon-bar" collapsed="false"/></RDF:Description></RDF:RDF>')    
         except Exception,e:
             print ('File open error', e,end='\r\n')
             return ['File open error'] 
-        mfile.write("[ExtensionDirs]\nExtension0=" + os.path.join(datadir, 'FF-profile', "extensions", "lspnr@lspnr") + "\n")
-        mfile.close()
-    
-   
+          
     if os.path.isfile(sslkeylog): os.remove(sslkeylog)
     open(sslkeylog,'w').close()
     os.putenv("SSLKEYLOGFILE", sslkeylog)
