@@ -79,8 +79,8 @@ function sendPageMarkedToBackend(){
 	reqPageMarked.open("HEAD", request_str, true);
 	reqPageMarked.send();
 
-	log("Finding HTML in our data");
-	log_toolbar("Finding HTML in our data");
+	log("Please be patient. Finding HTML in our data. This can take up to 30 seconds");
+	log_toolbar("Please be patient. Finding HTML in our data. This can take up to 30 seconds");
 	isPageMarkedResponded = false;
 	setTimeout(responsePageMarked, 1000, 0);
 }
