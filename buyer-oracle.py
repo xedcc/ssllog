@@ -18,6 +18,7 @@ import re
 import shutil
 import signal
 import SimpleHTTPServer
+import stat
 import struct
 import subprocess
 import sys
@@ -794,6 +795,8 @@ def start_tunnel(privkey_file, oracle_address):
         retval = convert_key()
         if retval != 'success':
             return retval
+    if OS=='linux':
+        os.chmod(alphatest_key, stat.S_IRUSR | stat.S_IWUSR)
         
     if os.path.isdir(logdir) : shutil.rmtree(logdir)
     os.mkdir(logdir)
