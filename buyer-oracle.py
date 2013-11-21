@@ -381,7 +381,9 @@ def find_page(accno, amount, click_time):
     #if chars were not ascii, FF extension sent it to us in url-encoded unicode
     accno = urllib2.unquote(accno).strip()
     amount = urllib2.unquote(amount).strip()
-    click_time_formatted = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(click_time)))
+    months = {"1":"Jan", "2":"Feb","3":"Mar","4":"Apr","5":"May","6":"Jun","7":"Jul","8":"Aug","9":"Sep","10":"Oct","11":"Nov","12":"Dec"}
+    month = time.strftime("%m", time.localtime(int(click_time)))
+    click_time_formatted = time.strftime( months[month]+" %d, %Y %H:%M:%S.000", time.localtime(int(click_time)))
     
     #try to find the HTML twice, becauce sometimes FF reports that page finished loading when in fact it hasn't
     for i in range(2):
