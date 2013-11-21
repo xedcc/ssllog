@@ -49,7 +49,8 @@ sslkey = os.path.join(datadir, 'sslkey')
 ssh_logfile = os.path.join(datadir, 'ssh.log')
 alphatest_key = os.path.join(installdir, 'alphatest.txt')
 alphatest_ppk = os.path.join(installdir, 'alphatest.ppk')
-
+#on older tshark versions on Linux this option can be "-R"
+tshark_display_filter_option = "-Y"
 
 if OS=='win':
     stcppipe_exepath = os.path.join(datadir,'stcppipe', 'stcppipe.exe')
@@ -60,6 +61,11 @@ if OS=='linux':
     stcppipe_exepath = os.path.join(datadir,'stcppipe', 'stcppipe')
     tshark_exepath = 'tshark'
     mergecap_exepath = 'mergecap'
+    #detect an older tshark version which will throw an exception when -Y is used
+    try:
+        subprocess.check_output([tshark_exepath, '-r', os.path.join(datadir,'tsharktest'), '-Y', "tcp"])
+    except:
+        tshark_display_filter_option = '-R'
     
 firefox_exepath = 'firefox'
 ssh_exepath = 'ssh'
@@ -278,7 +284,7 @@ def decrypt_escrowtrace():
         print ('Mergecap error',  end='\r\n')
         return 'Mergecap error'
     #hard-coded port 3128 is squid's port on oracle
-    output = subprocess.check_output([tshark_exepath, '-r', os.path.join(escrowtracedir, 'merged'), '-Y', 'ssl and http.content_type contains html', '-C', 'paysty', '-o', 'ssl.keylog_file:'+ sslkey, '-o',  'http.ssl.port:3128', '-x'])
+    output = subprocess.check_output([tshark_exepath, '-r', os.path.join(escrowtracedir, 'merged'), tshark_display_filter_option, 'ssl and http.content_type contains html', '-C', 'paysty', '-o', 'ssl.keylog_file:'+ sslkey, '-o',  'http.ssl.port:3128', '-x'])
     if output == '': 
         ssh_proc.stdin.write('exit failure\n')    
         return "Failed to find HTML in escrowtrace"
@@ -397,10 +403,10 @@ def find_page(accno, amount, click_time):
         time.sleep(1)
         
         #find all HTML pages after click_time
-        output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http.content_type contains html and http.response.code == 200 and frame.time > "' + click_time_formatted + '"', '-C', 'paysty', '-o', 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port), '-x'])
+        output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, 'merged'), tshark_display_filter_option, 'ssl and http.content_type contains html and http.response.code == 200 and frame.time > "' + click_time_formatted + '"', '-C', 'paysty', '-o', 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port), '-x'])
         
         #we need source and desftination port so that we could later determine which acp file the stream belongs to
-        ports = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, 'merged'), '-Y', 'ssl and http.content_type contains html and http.response.code == 200 and frame.time > "' + click_time_formatted + '"', '-C', 'paysty','-o' , 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port), '-T', 'fields', '-e', 'tcp.srcport', '-e', 'tcp.dstport'])
+        ports = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, 'merged'), tshark_display_filter_option, 'ssl and http.content_type contains html and http.response.code == 200 and frame.time > "' + click_time_formatted + '"', '-C', 'paysty','-o' , 'ssl.keylog_file:'+ sslkeylog, '-o', 'http.ssl.port:'+str(random_ssh_port), '-T', 'fields', '-e', 'tcp.srcport', '-e', 'tcp.dstport'])
         
         #output may contain multiple frames with HTML, we examine them one-by-one        
         separator = re.compile('Frame ' + re.escape('(') + '[0-9]{2,7} bytes' + re.escape(')') + ':')
@@ -451,7 +457,7 @@ def extract_ssl_key(filename, click_time):
         tmpkey_fd.flush()
         tmpkey_fd.close()
         #check if this key can decrypt the HTML
-        output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, filename), '-Y', 'ssl and http.content_type contains html and frame.time > "' + click_time + '"', '-o', 'ssl.keylog_file:'+ sslkey, '-C', 'paysty', '-o', 'http.ssl.port:'+str(random_ssh_port)])
+        output = subprocess.check_output([tshark_exepath, '-r', os.path.join(logdir, filename), tshark_display_filter_option, 'ssl and http.content_type contains html and frame.time > "' + click_time + '"', '-o', 'ssl.keylog_file:'+ sslkey, '-C', 'paysty', '-o', 'http.ssl.port:'+str(random_ssh_port)])
         if output == '': continue
         #else
         is_key_found = True
