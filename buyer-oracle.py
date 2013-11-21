@@ -810,7 +810,7 @@ def start_tunnel(privkey_file, oracle_address):
     if stcppipe_proc.poll() != None:
         return 'stcppipe error'
     if OS=='linux':        
-        ssh_proc = subprocess.Popen([ssh_exepath, '-i', alphatest_key, '-o', 'StrictHostKeyChecking=no', username+'@'+oracle_address, '-L', str(random_ssh_port)+':localhost:'+assigned_port, '-p', '22'], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        ssh_proc = subprocess.Popen([ssh_exepath, '-i', alphatest_key, '-o', 'StrictHostKeyChecking=no',  '-o', 'IdentitiesOnly=yes', username+'@'+oracle_address, '-L', str(random_ssh_port)+':localhost:'+assigned_port, '-p', '22'], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         is_ssh_session_active = True
     elif OS=='win':
         ssh_proc = subprocess.Popen([plink_exepath, '-i', alphatest_ppk,  username+'@'+oracle_address, '-L', str(random_ssh_port)+':localhost:'+assigned_port, '-P', '22'], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
