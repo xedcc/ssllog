@@ -394,8 +394,8 @@ def find_page(accno, amount, click_time):
     #try to find the HTML twice, becauce sometimes FF reports that page finished loading when in fact it hasn't
     for i in range(2):
         print ("Attempt no:"+ str(i+1) +" to find HTML in our trace")
-        #give some time for the page to finish loading completely
-        time.sleep(5)
+        #give some time for the page to finish loading completely if no HTML was found on the first iteration
+        time.sleep(i*5)
         if os.path.isfile(os.path.join(logdir, 'merged')): os.remove(os.path.join(logdir, 'merged'))
         filelist = os.listdir(logdir)
         mergecap_args = [mergecap_exepath, '-w', 'merged'] + filelist
