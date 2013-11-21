@@ -444,7 +444,8 @@ def extract_ssl_key(filename, click_time):
     is_key_found = False
     for index,key in enumerate(keys):
         print ('Processing key number:' + str(index+1), end='\r\n')
-        if not key.startswith('CLIENT_RANDOM'): continue
+        #commented out because tshark 1.6.7 looks for lines starting with RSA. TODO: investigate why.
+        #if not key.startswith('CLIENT_RANDOM'): continue
         tmpkey_fd = open(sslkey, 'w')
         tmpkey_fd.write(key+'\n')
         tmpkey_fd.flush()
