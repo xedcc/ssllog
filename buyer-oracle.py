@@ -77,7 +77,7 @@ FF_to_backend_port = 0
 #random port which FF uses as proxy port. Local stcppipe listens on this port and forwards traffic to random_ssh_port
 FF_proxy_port = 0
 #ID of a public snapshot on Amazon EC2. How this snapshot was created is outlined in oracle/INSTALL
-oracle_snapID = 'snap-d4741ed0'
+oracle_snapID = 'snap-81a54469'
 
 accno = None
 sum_ = None
@@ -568,7 +568,7 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
             return 'bad oracle'
         instance = one_dns_name.parentNode
     
-        if instance.getElementsByTagName('imageId')[0].firstChild.data != 'ami-a73264ce' or\
+        if instance.getElementsByTagName('imageId')[0].firstChild.data != 'ami-35258228' or\
         instance.getElementsByTagName('instanceState')[0].getElementsByTagName('name')[0].firstChild.data != 'running' or\
         instance.getElementsByTagName('rootDeviceName')[0].firstChild.data != '/dev/sda1':
             return 'bad oracle'
@@ -623,8 +623,8 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
         attached_volume.getElementsByTagName('instanceId')[0].firstChild.data != instanceId or\
         attached_volume.getElementsByTagName('device')[0].firstChild.data != '/dev/sda2' or\
         attached_volume.getElementsByTagName('status')[0].firstChild.data != 'attached' or\
-        attached_volume.getElementsByTagName('attachTime')[0].firstChild.data != attachTime or\
-        attached_volume.getElementsByTagName('attachTime')[0].firstChild.data != createTime:
+        attached_volume.getElementsByTagName('attachTime')[0].firstChild.data[:-4] != attachTime[:-4] or\
+        attached_volume.getElementsByTagName('attachTime')[0].firstChild.data[:-4] != createTime[:-4]:
             return 'bad oracle'
     except Exception,e:
         print(e, end='\r\n')
