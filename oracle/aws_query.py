@@ -10,13 +10,13 @@ if len(sys.argv) == 1:
     print ('Or alternatively: AWS-secret "string containing all components necessary for building a query separated with &"')
 
 args = []
-endpoint = default_endpoint = 'ec2.us-east-1.amazonaws.com'
+endpoint = default_endpoint = 'ec2.sa-east-1.amazonaws.com'
 common_args = [('Expires=2015-01-01'), ('SignatureMethod=HmacSHA256'), ('SignatureVersion=2')]
 
 if len(sys.argv) >= 4:
     if sys.argv[1] == "DescribeInstances" or sys.argv[1] == "DescribeVolumes" or sys.argv[1] == "GetConsoleOutput":
-        args.append('Version=2013-08-15')
-        endpoint = 'ec2.us-east-1.amazonaws.com'
+        args.append('Version=2013-10-15')
+        endpoint = 'ec2.sa-east-1.amazonaws.com'
     if sys.argv[1] == "GetConsoleOutput":
         args.append(sys.argv[2])
     if sys.argv[1] == "GetUser":
@@ -24,7 +24,7 @@ if len(sys.argv) >= 4:
         endpoint = 'iam.amazonaws.com'
     if sys.argv[1] == "ListMetrics":
         args.append('Version=2010-08-01')
-        endpoint = 'monitoring.us-east-1.amazonaws.com'
+        endpoint = 'monitoring.sa-east-1.amazonaws.com'
         
     args += common_args
     args.append('Action='+sys.argv[1])
