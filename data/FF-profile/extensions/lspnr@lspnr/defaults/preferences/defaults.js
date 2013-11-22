@@ -1,6 +1,6 @@
 pref("extensions.lspnr.default_escrow", "dansmith");
-pref("extensions.lspnr.escrow_list", "dansmith");
-pref("extensions.lspnr.snapshot_id", "snap-81a54469");
+pref("extensions.lspnr.escrow_list", "dansmith;waxwing");
+pref("extensions.lspnr.snapshot_id", "reserved for later use");
 pref("extensions.lspnr.msg_ipc", "");
 pref("extensions.lspnr.msg_toolbar", "");
 pref("extensions.lspnr.first_run", true);
@@ -13,6 +13,15 @@ pref("extensions.lspnr.escrow_dansmith.listmetricsurl", "https://monitoring.sa-e
 pref("extensions.lspnr.escrow_dansmith.describeinstancesurl", "https://ec2.sa-east-1.amazonaws.com/?AWSAccessKeyId=AKIAI3J2VY5V6W3XDV2Q&Action=DescribeInstances&Expires=2015-01-01&SignatureMethod=HmacSHA256&SignatureVersion=2&Version=2013-10-15&Signature=wGzH6YE2JNhlEsbRi8r%2Bu%2FVb4W1s2W6oMETBWBxB5%2BA%3D");
 pref("extensions.lspnr.escrow_dansmith.describevolumesurl", "https://ec2.sa-east-1.amazonaws.com/?AWSAccessKeyId=AKIAI3J2VY5V6W3XDV2Q&Action=DescribeVolumes&Expires=2015-01-01&SignatureMethod=HmacSHA256&SignatureVersion=2&Version=2013-10-15&Signature=n9b%2BcKDlEWgy2LPSpg7N%2FPkA%2Bkn1n8pOJtLNOydGtRg%3D");
 pref("extensions.lspnr.escrow_dansmith.getconsoleoutputurl", "https://ec2.sa-east-1.amazonaws.com/?AWSAccessKeyId=AKIAI3J2VY5V6W3XDV2Q&Action=GetConsoleOutput&Expires=2015-01-01&InstanceId=i-87e5ad98&SignatureMethod=HmacSHA256&SignatureVersion=2&Version=2013-10-15&Signature=%2BmBLaKFFNrRSLSxi5erIt4c2JpUxCUsaS3NP8LvX%2Fjw%3D");
+
+pref("extensions.lspnr.escrow_waxwing.dnsname", "ec2-54-194-62-59.eu-west-1.compute.amazonaws.com");
+pref("extensions.lspnr.escrow_waxwing.getuserurl", "https://iam.amazonaws.com/?AWSAccessKeyId=AKIAJXRKYPZ26KIDNWOQ&Action=GetUser&Expires=2015-01-01&SignatureMethod=HmacSHA256&SignatureVersion=2&Version=2010-05-08&Signature=SKCkfXVj7JW0mhmDyf%2BDEmcCG5e8kvn%2B%2F%2FBn3o%2Bzqrk%3D");
+pref("extensions.lspnr.escrow_waxwing.listmetricsurl", "https://monitoring.eu-west-1.amazonaws.com/?AWSAccessKeyId=AKIAJXRKYPZ26KIDNWOQ&Action=ListMetrics&Expires=2015-01-01&SignatureMethod=HmacSHA256&SignatureVersion=2&Version=2010-08-01&Signature=F4gcfAm99u6k3VBNXKTRVi4moDLxqICb%2BaLJS4lnkxs%3D");
+pref("extensions.lspnr.escrow_waxwing.describeinstancesurl", "https://ec2.eu-west-1.amazonaws.com/?AWSAccessKeyId=AKIAJXRKYPZ26KIDNWOQ&Action=DescribeInstances&Expires=2015-01-01&SignatureMethod=HmacSHA256&SignatureVersion=2&Version=2013-08-15&Signature=HNnS3ZScK4Fy7zxUOgi82xTVZh9qIv03ycc6Yh%2BrpLA%3D");
+pref("extensions.lspnr.escrow_waxwing.describevolumesurl", "https://ec2.eu-west-1.amazonaws.com/?AWSAccessKeyId=AKIAJXRKYPZ26KIDNWOQ&Action=DescribeVolumes&Expires=2015-01-01&SignatureMethod=HmacSHA256&SignatureVersion=2&Version=2013-08-15&Signature=Faw8hoVgu7eDTFJ1IQh9fwfkNaZXqJMAhm8k3LNQjMU%3D");
+pref("extensions.lspnr.escrow_waxwing.getconsoleoutputurl", "https://ec2.eu-west-1.amazonaws.com/?AWSAccessKeyId=AKIAJXRKYPZ26KIDNWOQ&Action=GetConsoleOutput&Expires=2015-01-01&InstanceId=i-076c3348&SignatureMethod=HmacSHA256&SignatureVersion=2&Version=2013-08-15&Signature=K0bwxDJp1iPs30lsqhynK5hJZT2aZ14yo%2FhYiWo86g4%3D");
+
+
 
 pref("security.ssl3.dhe_dss_aes_128_sha", false);
 pref("security.ssl3.dhe_dss_aes_256_sha",false);

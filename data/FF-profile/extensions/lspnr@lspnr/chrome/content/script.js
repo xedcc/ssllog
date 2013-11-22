@@ -1,5 +1,6 @@
 var reqPageMarked;
 var reqCheckEscrowtrace;
+var reqStarted;
 var isPageMarkedResponded = false;
 var isCheckEscrowtraceResponded = false;
 var is_accno_entered = false;
@@ -26,12 +27,23 @@ Components.classes["@mozilla.org/preferences-service;1"].getService(Components.i
 if (first_window === "true" ) {
 	//Let the backend know that it can remove the splashscreen
 	var reqStarted = new XMLHttpRequest();
+	reqStarted.onload = responseStarted;
 	reqStarted.open("HEAD", "http://127.0.0.1:"+port+"/started", true);
 	reqStarted.send();    
 
 	setProxyPrefs();
 }
 
+function responseStarted() {
+	var preferred_escrow = reqStarted.getResponseHeader("preferred_escrow");
+	if ( (preferred_escrow != "dansmith") || (preferred_escrow != "waxwing") ){
+		log("Internal error. Unrecognized escrow: " + preferred_escrow );
+		log_toolbar("Internal error. Unrecognized escrow: " + preferred_escrow);
+	}
+	var prefs = Components.classes["@mozilla.org/preferences-service;1"]
+                    .getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.");
+    prefs.setCharPref("default_escrow", preferred_escrow);
+}
 
 //copied from https://developer.mozilla.org/en-US/docs/Code_snippets/Progress_Listeners
 const STATE_STOP = Ci.nsIWebProgressListener.STATE_STOP;

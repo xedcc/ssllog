@@ -77,7 +77,8 @@ FF_to_backend_port = 0
 #random port which FF uses as proxy port. Local stcppipe listens on this port and forwards traffic to random_ssh_port
 FF_proxy_port = 0
 #ID of a public snapshot on Amazon EC2. How this snapshot was created is outlined in oracle/INSTALL
-oracle_snapID = 'snap-81a54469'
+oracle_snapID = ['snap-81a54469', 'snap-ed30cdfc']
+amis = ['ami-35258228','ami-8e987ef9']
 
 accno = None
 sum_ = None
@@ -89,6 +90,7 @@ assigned_port = None
 username = "ubuntu"
 is_ff_started = False
 is_ssh_session_active = False
+preferred_escrow = None
 
 #a thread which returns a value. This is achieved by passing self as the first argument to a called function
 #the calling function can then set self.retval
@@ -246,6 +248,7 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
             self.send_response(200)
             self.send_header("response", "started")
             self.send_header("value", "success")
+            self.send_header("preferred_escrow", preferred_escrow)
             self.end_headers()
             return                
     
@@ -568,7 +571,7 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
             return 'bad oracle'
         instance = one_dns_name.parentNode
     
-        if instance.getElementsByTagName('imageId')[0].firstChild.data != 'ami-35258228' or\
+        if instance.getElementsByTagName('imageId')[0].firstChild.data not in amis or\
         instance.getElementsByTagName('instanceState')[0].getElementsByTagName('name')[0].firstChild.data != 'running' or\
         instance.getElementsByTagName('rootDeviceName')[0].firstChild.data != '/dev/sda1':
             return 'bad oracle'
@@ -612,7 +615,7 @@ def check_oracle_urls (GetUserURL, ListMetricsURL, DescribeInstancesURL, Describ
             return 'bad oracle'
         volume = one_volume_ID.parentNode
     
-        if volume.getElementsByTagName('snapshotId')[0].firstChild.data != oracle_snapID or\
+        if volume.getElementsByTagName('snapshotId')[0].firstChild.data not in oracle_snapID or\
         volume.getElementsByTagName('status')[0].firstChild.data != 'in-use' or\
         volume.getElementsByTagName('volumeType')[0].firstChild.data != 'standard':
             return 'bad oracle'
@@ -1002,6 +1005,24 @@ if __name__ == "__main__":
             print ('plink and python integrity checked...',end='\r\n')            
             
             
+    
+    #a temporary hack to determine whether dansmith or waxwing was the one who issued a private key
+    #by convention, dansmith's privkey ends with "==", otherwise it Is waxwing's
+    if not os.path.isfile(alphatest_key): 
+        if OS== 'win': MessageBox(None, 'Please make sure alphatest.txt is in your installation directory', 0)
+        else: print ('Please make sure alphatest.txt is in your installation directory')
+        exit(1)
+    with open(alphatest_key, 'r') as keyfile: keytext = keyfile.read()
+    lines = keytext.split('\n')
+    lines.reverse()
+    for index,line in enumerate(lines):
+        if line.count('-----END RSA PRIVATE KEY-----') > 0: break
+    if lines[index+1].endswith('=='):
+        preferred_escrow = 'dansmith'
+    else: preferred_escrow = 'waxwing'
+        
+    
+    
     if OS=='win':
         if os.path.isfile(os.path.join(os.getenv('programfiles'), "Mozilla Firefox",  "firefox.exe" )): 
             firefox_exepath = os.path.join(os.getenv('programfiles'), "Mozilla Firefox",  "firefox.exe" )
