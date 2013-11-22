@@ -335,7 +335,8 @@ def get_html_from_asciidump(ascii_dump):
         for line in ascii_dump[uncompr_pos:].split('\n')[1:]:
             #convert ascii representation of hex into binary so long as first 4 chars are hexdigits
             if all(c in hexdigits for c in line [:4]):
-                m_array = bytearray.fromhex(line[6:54])
+                try: m_array = bytearray.fromhex(line[6:54])
+                except: break
                 binary_html += m_array
             else:
                 #if first 4 chars are not hexdigits, we reached the end of the section
@@ -347,7 +348,8 @@ def get_html_from_asciidump(ascii_dump):
     if dechunked_pos != -1:
         for line in ascii_dump[dechunked_pos:].split('\n')[1:]:
             if all(c in hexdigits for c in line [:4]):
-                m_array = bytearray.fromhex(line[6:54])
+                try: m_array = bytearray.fromhex(line[6:54])
+                except: break
                 binary_html += m_array
             else:
                 break
@@ -358,7 +360,8 @@ def get_html_from_asciidump(ascii_dump):
     if reassembled_pos != -1:
         for line in ascii_dump[reassembled_pos:].split('\n')[1:]:
             if all(c in hexdigits for c in line [:4]):
-                m_array = bytearray.fromhex(line[6:54])
+                try: m_array = bytearray.fromhex(line[6:54])
+                except: break
                 binary_html += m_array
             else:
                 #http HEADER is delimited from HTTP body with '\r\n\r\n'
@@ -372,7 +375,8 @@ def get_html_from_asciidump(ascii_dump):
     if decrypted_pos != -1:       
         for line in ascii_dump[decrypted_pos:].split('\n')[1:]:
             if all(c in hexdigits for c in line [:4]):
-                m_array = bytearray.fromhex(line[6:54])
+                try: m_array = bytearray.fromhex(line[6:54])
+                except: break
                 binary_html += m_array
             else:
                 #http HEADER is delimited from HTTP body with '\r\n\r\n'
