@@ -1,120 +1,166 @@
 -------------------------------------------------------------------------------
-HOW TO CREATE AN ORACLE EBS SNAPSHOT.
+FOR ESCROW AGENTS: HOW TO CREATE AN ORACLE EBS SNAPSHOT.
+-------------------------------------------------------------------------------
+
 
 NB: You will have to dedicate an entire AWS account for the purpose of running an oracle.
 
-Launch a new instance Ubuntu Server 12.04.3 LTS 64 bit AMI ID ami-a73264ce (in zone us-east-1a)
+Launch a new instance Ubuntu Server 12.04.3 LTS 64 bit AMI ID ami-35258228 (in South America Sao Paulo region)
 Wait for the instance to initialize and "Status Checks" showing "2/2 checks passed".
 Stop the instance, wait for the state to become "Stopped", and detach the volume.
-Wait for the volume state to become "available" and attach the volume to any running instance.
+Wait for the volume state to become "available" and attach the volume to any running instance as e.g /dev/sdf
 
-From within the running instance "sudo mount" the volume and perform file system changes to the mounted volume:
-
+From within the running instance "sudo mount /dev/xvdf /mnt/disk" and perform file system changes to the mounted volume:
 (The reason the items below must be deleted is because files in those locations are modified during boot time and will always vary between instances of the same AMI.)
 
-delete and recreate /dev with permissions 755 root:root
-rm /etc/hostname 
-rm -r /var/log
-rm -r /var/lib/cloud
-rm -r /var/lib/dhcp
-rm -r /var/lib/plymouth
-rm -r /var/lib/urandom
-rm /etc/ssh/ssh_host_*
-rm /home/ubuntu/.ssh/authorized_keys
-rm /home/root/.ssh/authorized_keys
+<bash>
+  sudo -s
+  DISK=/mnt/disk
+  rm -r $DISK/dev && mkdir $DISK/dev && chmod 755 $DISK/dev && chown root:root $DISK/dev
+  rm $DISK/etc/hostname 
+  rm -r $DISK/var/log
+  rm -r $DISK/var/lib/cloud
+  rm -r $DISK/var/lib/dhcp
+  rm -r $DISK/var/lib/plymouth
+  rm -r $DISK/var/lib/update-manager
+  rm -r $DISK/var/lib/urandom
+  rm $DISK/etc/ssh/ssh_host_*
+  rm $DISK/home/ubuntu/.ssh/authorized_keys
+  rm $DISK/root/.ssh/authorized_keys
+</bash>
 
-Copy the following files from git's oracle directory (git tag alpha_oracle) making sure the permissions and ownership match:
- 
-rc.local        to /etc/rc.local 	 perm 755	root:root
-ssh.conf        to /etc/init/ssh.conf  	 perm 644 	root:root
-sshd_config     to /etc/ssh/sshd_config	 perm 644	root:root
-authorized_keys to /home/ubuntu/.ssh/authorized_keys perm 600 	ubuntu:ubuntu
-oracle.py       to /home/ubuntu		 perm 600	ubuntu:ubuntu
-stub.py         to /home/ubuntu		 perm 600	ubuntu:ubuntu	
-stcppipe.zip    to /home/ubuntu		 perm 600	ubuntu:ubuntu
+Copy the files from git repo making sure the permissions and ownership match:
 
-Make sure that e2label /dev/xvd(mounted volume) gives you "cloudimg-rootfs"
+<bash>
+  apt-get install git
+  git clone https://github.com/themighty1/ssllog.git
+  cd ssllog
+  git checkout alpha_oracle
+  cd oracle
+  FILEDEST=$DISK/etc/rc.local
+  cp rc.local $FILEDEST && chmod 755 $FILEDEST && chown root:root $FILEDEST
+  FILEDEST=$DISK/etc/init/ssh.conf
+  cp ssh.conf $FILEDEST && chmod 644 $FILEDEST && chown root:root $FILEDEST
+  FILEDEST=$DISK/etc/ssh/sshd_config
+  cp sshd_config $FILEDEST && chmod 644 $FILEDEST && chown root:root $FILEDEST
+  FILEDEST=$DISK/home/ubuntu/.ssh/authorized_keys
+  cp authorized_keys $FILEDEST && chmod 600 $FILEDEST && chown ubuntu:ubuntu $FILEDEST
+  FILEDEST=$DISK/home/ubuntu/oracle.py
+  cp oracle.py $FILEDEST && chmod 600 $FILEDEST && chown ubuntu:ubuntu $FILEDEST
+  FILEDEST=$DISK/home/ubuntu/stub.py
+  cp stub.py $FILEDEST && chmod 600 $FILEDEST && chown ubuntu:ubuntu $FILEDEST
+  FILEDEST=$DISK/home/ubuntu/stcppipe.zip
+  cp stcppipe.zip $FILEDEST && chmod 600 $FILEDEST && chown ubuntu:ubuntu $FILEDEST
+</bash>
 
-"umount" the volume and detach it in the AWS console.
+Make sure the output of "e2label /dev/xvdf" is "cloudimg-rootfs"
+"umount /dev/xvdf" and detach it in the AWS console.
 Create a public snapshot from the volume and note the snapshot ID.
 
 
 -------------------------------------------------------------------------------
-HOW TO CREATE AN ORACLE INSTANCE FROM THE ORACLE EBS SNAPSHOT.
+FOR ESCROW AGENTS: HOW TO CREATE AN ORACLE INSTANCE FROM THE ORACLE EBS SNAPSHOT.
+-------------------------------------------------------------------------------
 
-Install ec2-api-tools on your local machine. You need to add a new apt-get repository. Please search online.
 
-ec2-run-instances ami-a73264ce -t t1.micro -z us-east-1a -b /dev/sda1=none -b /dev/sda2=snap-d4741ed0::false:standard -O <Access Key ID> -W <Secret Access Key>
+For best experience we recommend starting another Ubuntu 12.04.3 LTS 64-bit instance:
+The default ec2-api-tools that come with 12.04 are obsolete, we need to force install the more recent verion.
+<bash>
+  wget http://mirrors.kernel.org/ubuntu/pool/multiverse/e/ec2-api-tools/ec2-api-tools_1.6.6.0-0ubuntu1_all.deb
+  sudo apt-get update
+  sudo dpkg -i ec2-api-tools_1.6.6.0-0ubuntu1_all.deb
+  sudo apt-get -f install
+</bash>
+Then run:
 
-Make sure that your EC2 security group allows inbound connections to TCP port 22.
-The rule looks like: Port range: 22, Source: 0.0.0.0/0
+ec2-run-instances ami-35258228 -t t1.micro -z us-east-1a -b /dev/sda1=none -b /dev/sda2=snap-81a54469::false:standard -O <Access Key ID> -W <Secret Access Key>
 
-Also make sure that instance's "launchTime" and volume's "attachTime" happened on the same minute with no more than 3 seconds between the events.
-Also make sure that Console Output (Get System Log) is available, since it was observed that sometimes EC2 doesn't produce any.
+Make sure that:
+  EC2 security group allows inbound connections to TCP port 22. The rule must look like: Port range: 22, Source: 0.0.0.0/
+  Instance's "launchTime" and volume's "attachTime" happened on the same minute with no more than 3 seconds between the events.
+  Console Output (right-click an instance & Get System Log) is available, since it was observed that sometimes EC2 doesn't produce any.
 
 
 -------------------------------------------------------------------------------
-HOW CAN AN HONEST ESCROW PROVE TO THE WORLD THAT A CERTAIN IP ADDRESS IS RUNNING THE ORACLE INSTANCE
+FOR ESCROW AGENTS: HOW CAN YOU PROVE TO THE WORLD THAT A CERTAIN IP ADDRESS IS RUNNING THE ORACLE INSTANCE
+-------------------------------------------------------------------------------
+
 
 Using aws_query.py create and make public GET strings for requests DescribeInstances, DescribeVolumes, GetUser, ListMetrics, and GetConsoleOutput.
-On a weekly basis, notarize and publicize the output of ListMetrics using virtual-notary.org 
+On a weekly basis, notarize and publicize the output of ListMetrics using virtual-notary.org (this is a redundant check which can be omitted)
 
 
 -------------------------------------------------------------------------------
-HOW CAN A THIRD PARTY CHECK THAT THE SNAPSHOT CONTENTS WAS NOT MALICIOUSLY MODIFIED.
-Repeat all the steps described in "HOW TO CREATE AN ORACLE EBS SNAPSHOT". You will get a custom volume.
+FOR VERIFIERS: HOW TO CHECK THAT THE SNAPSHOT CONTENTS WAS NOT MALICIOUSLY MODIFIED.
+-------------------------------------------------------------------------------
 
-Create a volume from the oracle snapshot which the escrow made public.
-Attach the volume to a running instance and mount it.
+
+Repeat all the steps described in "HOW TO CREATE AN ORACLE EBS SNAPSHOT" but don't create a public snapshot.
+Attach the resulting volume to a running instance as /dev/sdg
+Create a volume from oracle public EBS snapshot and attach it to /dev/sdh
+<bash>
+  sudo -s
+  mount /dev/xvdg /mnt/disk1
+  mount /dev/xvdh /mnt/disk2
+</bash>
  
-Now compare the hashes of the custom volume to the hashes of the volume from the oracle snapshot. You will first hash file/directory/symlink paths, ownership, permissions, and symlink targets then hash the contents of all regular files.
+Now compare the hashes of the resulting volume to the hashes of the volume from the oracle EBS snapshot. You will first hash file/directory/symlink paths, ownership, permissions, and symlink targets then hash the contents of all regular files.
+<bash>
+  cd /mnt/disk1
+  find . -printf '%h %f %U %G %m %l\n' | sort -t \n | sha256sum
+  find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum
+  e2label /dev/xvdg
 
-cd into the root directory of the mounted volume , e.g. "cd /mnt/myvolume" and "sudo -s"
+  cd /mnt/disk2
+  find . -printf '%h %f %U %G %m %l\n' | sort -t \n | sha256sum
+  find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum
+  e2label /dev/xvdh  
+</bash>
 
-find . -printf '%h %f %U %G %m %l\n' | sort -t \n | sha256sum
-e.g. 7bf9cb798a6cf4c14d6a5a6349e692f5415ee0396c0928baebbcaf6e10548280
-
-find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum
-e.g. e96af182161b00ef1e4437702c077e220c956ac3a30625040ed74a5a26b533db
-
-e2label /dev/xvd(the letter of the attached volume)
-cloudimg-rootfs
+The outputs must be respectively (repeated two times):
+  1929e775a33c4206fe7b5edfa424d12941171a40a4717abdc8138f72c36cc61d
+  2a42f65487809a016a8670e6c0dca8913cd93f484de53abe7470037002954ba0
+  cloudimg-rootfs
 
 -------------------------------------------------------------------------------
-HOW CAN A THIRD PARTY DETERMINE THAT THE RUNNING ORACLE INSTANCE HAS NOT BEEN TAMPERED WITH.
+FOR VERIFIERS: HOW TO DETERMINE THAT THE RUNNING ORACLE INSTANCE HAS INDEED BEEN STARTED FROM THE PUBLIC EBS SNAPSHOT
+-------------------------------------------------------------------------------
+
 
 Using the GET URLs made public by escrow, make sure that the following requirements are met:
 
 1.	In DescribeInstances URL (DIURL):
-"dnsName" matches the DNS name of the oracle
-"imageID" is "ami-d0f89fb9"
-"instanceState""name" is "running"
-"rootDeviceName" is "/dev/sda1"
-in "blockDeviceMapping" there should be ONLY ONE "item" with "deviceName" "/dev/sda2", "ebs""status" is "attached"
-compare "launchTime" and "ebs""attachTime". The two event must happen on the same minute and no more than 3 seconds apart.
+  "dnsName" matches the DNS name of the oracle
+  "imageID" is "ami-d0f89fb9"
+  "instanceState""name" is "running"
+  "rootDeviceName" is "/dev/sda1"
+  in "blockDeviceMapping" there should be ONLY ONE "item" with "deviceName" "/dev/sda2", "ebs""status" is "attached"
+  compare "launchTime" and "ebs""attachTime". The two event must happen on the same minute and no more than 3 seconds apart.
 
 2.	In DescribeVolumes URL (DVURL): 
-"volumeId" matches "ebs""volumeId" from DIURL
-"snapshotId" matches a public snaphot ID which has been verified using the above instructions "HOW CAN A THIRD PARTY CHECK THAT THE SNAPSHOT CONTENTS WAS NOT MALICIOUSLY MODIFIED."
-"status" is "in-use"
-"volumeType" is "standard"
-"attachmentSet""item""volumeId" matches "ebs""volumeId" from DIURL
-"attachmentSet""item""instanceId" matches "instanceId" from DIURL
-"attachmentSet""item""device" is "/dev/sd2"
-"attachmentSet""item""status" is "attached"
-"attachmentSet""item""attachTime" matches "createTime" and matches "ebs""attachTime" from DIURL
-"attachmentSet""item""attachTime" was attached on the same minute as & no later than 3 seconds from "launchtime" from DIURL 
+  "volumeId" matches "ebs""volumeId" from DIURL
+  "snapshotId" matches a public snaphot ID which has been verified using the above instructions -
+  "FOR VERIFIERS: HOW TO CHECK THAT THE SNAPSHOT CONTENTS WAS NOT MALICIOUSLY MODIFIED."
+  "status" is "in-use"
+  "volumeType" is "standard"
+  "attachmentSet""item""volumeId" matches "ebs""volumeId" from DIURL
+  "attachmentSet""item""instanceId" matches "instanceId" from DIURL
+  "attachmentSet""item""device" is "/dev/sd2"
+  "attachmentSet""item""status" is "attached"
+  "attachmentSet""item""attachTime" matches "createTime" and matches "ebs""attachTime" from DIURL
+  "attachmentSet""item""attachTime" was attached on the same minute as & no later than 3 seconds from "launchtime" from DIURL 
 
 3.	In GetConsoleOutput URL:
-the base64-decoded "output" node must not match the regular expression 'xvd[^a] | xvda[^2]' which means that no string starting with "xvd" is allowed to be present, other than the string "xvda2"
-"instanceId" matches "instanceId" from DIURL
+  the base64-decoded "output" node must not match the regular expression 'xvd[^a] | xvda[^2]'
+  which means that no string starting with "xvd" is allowed to be present, other than the string "xvda2"
+  "instanceId" matches "instanceId" from DIURL
 
 4.	In GetUser URL:
-"UserId" matches "ownerId" from DIURL
-"Arn" ends with "<ownerId>:root"
+  "UserId" matches "ownerId" from DIURL
+  "Arn" ends with "<ownerId>:root"
 
 5.	In ListMetrics URL:
-For all those nodes where "Name" is "VolumeId", "Value" matches "blockDeviceMapping""item""ebs""volumeId" from DIURL
+  For all those nodes where "Name" is "VolumeId", "Value" matches "blockDeviceMapping""item""ebs""volumeId" from DIURL
 
 6. All the URL strings have the same "AWSAccessKeyId"
 
@@ -123,12 +169,15 @@ Explanation:
 "AWSAccessKeyId" should be the same to prove that the queries are made on behalf of AWS user "root".
 Otherwise the attacker could create a user with limited privileges for whom the Query API would report only partial information.
 
-ListMetrics shows all the volumes which existed under the AWS account within the last 2 weeks, whether those volumes are now deleted or not. This creates an extra layer of security against yet-unknown vulnerabilities.
+ListMetrics shows all the volumes which existed under the AWS account within the last 2 weeks, whether those volumes are now deleted or not. This creates an extra layer of security against yet-unknown vulnerabilities. We simply don't allow the escrow to have any other volumes under his AWS account.
 
 
 -------------------------------------------------------------------------------
 POSSIBLE ATTACKS AND HOW THEY WILL BE MITIGATED
-(or in other words, what will prevent a dishonest escrow (a.k.a an attacker) from modifying the oracle code)
+-------------------------------------------------------------------------------
+(or in other words, what will prevent a dishonest escrow a.k.a an attacker from modifying the oracle code)
+
+
 
 Attack 1.
 The attacker will launch the instance with his rogue volume on /dev/sda2 and oracle volume on /dev/sda3.
@@ -145,7 +194,7 @@ Attack 2.
 The attacker will mount his rogue volume on /dev/sda2 and oracle volume on /dev/sda3. A program on the rogue volume will patch the running kernel in such a way that the now-rogue kernel will overwrite the Console log with fake info, modify and remount oracle volume as root device on /dev/sda2. After that the attacker can unmount/detach his rogue volume.
 
 Mitigation:
-see Mitigation B & C in Attack 1.
+same as Mitigation B & C in Attack 1.
 
 
 
