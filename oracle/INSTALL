@@ -82,6 +82,32 @@ Make sure that:
 
 
 -------------------------------------------------------------------------------
+FOR ESCROW AGENTS: YOUR FIRST ACTIONS AFTER LAUNCHING AN ORACLE INSTANCE
+-------------------------------------------------------------------------------
+
+Login to the oracle instance and register a new access key for the escrow:
+  ssh -o IdentitiesOnly=true -i oracle/escrow_key ubuntu@dnsmaneOrIPAdressOfTheOracleInstance
+
+Type on the stdin:
+<type>
+  register_escrow aVeryLongStringContainingTheNewPubkeyWhichTheEscrowWillBeUsingToLoginToTheOracle-ItShouldBeInSSH2PubkeyFormat-YouCanGetItByRunning-ssh-keygen escrowHTTPPostServerIP escrowHTTPPostServerPort
+  exit
+</type>
+The HTTP POST server can be launched from oracle/post_server.py. That's where the oracle will send tarballs with SSL trace.
+
+
+Now login with your newly registered escrow key:
+  ssh -o IdentitiesOnly=true -i newly-registered-key ubuntu@dnsmaneOrIPAdressOfTheOracleInstance
+
+Add a user of the oracle:
+<type>
+  add_pubkey adfe-23dd pubkey port
+</type>
+where adfe-23dd is a unique string (used only for convenience), pubkey is the user's pubkey, port is the internal port on the oracle on which stcppipe will be listening (use the default 2134)
+
+
+
+-------------------------------------------------------------------------------
 FOR ESCROW AGENTS: HOW CAN YOU PROVE TO THE WORLD THAT A CERTAIN IP ADDRESS IS RUNNING THE ORACLE INSTANCE
 -------------------------------------------------------------------------------
 
