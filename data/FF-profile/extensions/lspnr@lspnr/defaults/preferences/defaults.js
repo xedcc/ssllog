@@ -1,6 +1,6 @@
 pref("extensions.lspnr.default_escrow", "dansmith");
 pref("extensions.lspnr.escrow_list", "dansmith");
-pref("extensions.lspnr.snapshot_id", "snap-d4741ed0");
+pref("extensions.lspnr.snapshot_id", "snap-81a54469");
 pref("extensions.lspnr.msg_ipc", "");
 pref("extensions.lspnr.msg_toolbar", "");
 pref("extensions.lspnr.first_run", true);
