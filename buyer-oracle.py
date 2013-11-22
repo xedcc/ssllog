@@ -395,7 +395,7 @@ def find_page(accno, amount, click_time):
     for i in range(2):
         print ("Attempt no:"+ str(i+1) +" to find HTML in our trace")
         #give some time for the page to finish loading completely if no HTML was found on the first iteration
-        time.sleep(i*5)
+        time.sleep(i*15)
         if os.path.isfile(os.path.join(logdir, 'merged')): os.remove(os.path.join(logdir, 'merged'))
         filelist = os.listdir(logdir)
         mergecap_args = [mergecap_exepath, '-w', 'merged'] + filelist
