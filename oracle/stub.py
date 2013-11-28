@@ -5,6 +5,7 @@ import sys
 #we want stub.py to start up quickly and perform the Anti-DOS check, hence the few imports
 
 TESTING=False
+is_auditor = False
 
 installdir = os.path.dirname(os.path.realpath(__file__))
 access_log_dir = os.path.join(installdir, 'accesslog')
@@ -13,15 +14,27 @@ oracle_socket = os.path.join(installdir, 'oracle-socket')
 #stub.py is invoked by sshd via the "command" option in authorizedkeys file when a pubkey logs in
 #when stub.py finishes, sending SIGTERM to parent sshd is a sure way to end the ssh connection
 sshd_ppid = os.getppid()
-if len(sys.argv) != 2:
+#argv[1] is tx-id, argv[2] is optional and can be "auditor" (for OT use)
+if len(sys.argv) < 2 or len(sys.argv) > 3:
     import signal
-    sys.stderr.write('Internal error. The amount of arguments in not 2\n')
+    sys.stderr.write('Internal error. The amount of arguments in not betweeb 2 and 3\n')
     sys.stderr.flush()
     time.sleep(1)
     os.kill(sshd_ppid, signal.SIGTERM)
     exit()
 txid = sys.argv[1]
-sys.stderr.write('Your txid is: '+txid+'\n')
+
+if len (sys.argv) == 3:
+    if sys.argv[2] != 'auditor':
+        import signal
+        sys.stderr.write('Internal error. The third argument is not "auditor"\n')
+        sys.stderr.flush()
+        time.sleep(1)
+        os.kill(sshd_ppid, signal.SIGTERM)
+        exit()
+    else:
+        is_auditor = True
+sys.stderr.write('Your txid (or the txid you are auditing) is: '+txid+'\n')
 sys.stderr.flush()
 if len(txid) != 9:
     import signal
@@ -38,7 +51,8 @@ if len(txid) != 9:
 #the user can only exceed the limit of login attempts if he is not using the provided software (which honors the limit)
 #After the user performed his banking session, the only reason why he would have to login again is to check the oracle's audit logs
 
-if not TESTING:
+#we don't have to protect from a DOS by an OpenTransactions auditor/judge, because the judge is a trusted party
+if not TESTING or not is_auditor:
     if not os.path.isdir(access_log_dir): os.mkdir(access_log_dir)
     access_file_path = os.path.join(access_log_dir, txid)
     
@@ -124,7 +138,7 @@ sys.stderr.flush()
   
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.connect(oracle_socket)          
-s.send(txid+' '+str(sshd_ppid))
+s.send(txid+' '+str(sshd_ppid)+(' auditor'if is_auditor else ''))
 
 data_in = None
 while 1:
@@ -137,7 +151,7 @@ while 1:
         #It was observed that sometimes select() triggers on empty stdin 
         if cmd:
             cmd = cmd.strip()
-            s.send(txid+'-cmd ' +cmd)
+            s.send(txid+'-cmd ' +cmd+(' auditor'if is_auditor else ''))
     if s in rlist:
         data_in = s.recv(4096)
         sys.stderr.write(data_in+'\n')

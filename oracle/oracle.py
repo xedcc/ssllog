@@ -94,6 +94,9 @@ def get_txid_index_in_db(txid, lock=True, ban=False):
 def get_database_as_a_string(txid):
     iostr = StringIO.StringIO()
     __LOCK_DB()
+    if get_txid_index_in_db(txid, lock=False) == -1:
+        __UNLOCK_DB()
+        return 'txid does not exist in database'
     iostr.write(database)
     __UNLOCK_DB()
     retval = iostr.getvalue()
@@ -102,19 +105,20 @@ def get_database_as_a_string(txid):
     else:
         return retval[ retval.rfind( "{", 0, retval.find("'txid': '"+txid+"'") ) : retval.find( "}", retval.find("'txid': '"+txid+"'") ) ]
 
-def escrow_add_pubkey(txid, pubkey, port):
-    #make sure the txid is not in the db already
-    __LOCK_DB()
-    index = get_txid_index_in_db(txid, lock=False)
-    if index >= 0:
+def escrow_add_pubkey(txid, pubkey, port=2134, isAuditor=False):
+    if not isAuditor:
+        #make sure the txid is not in the db already
+        __LOCK_DB()
+        index = get_txid_index_in_db(txid, lock=False)
+        if index >= 0:
+            __UNLOCK_DB()
+            return (-1, 'txid already added')
+        database.append({'txid':txid, 'pubkey':pubkey, 'port':int(port), 'added': int(time.time()), 'is_logged_in_now':False, 'last_login_time':0, 'finished_banking':0, 'hash': '', 'escrow_fetched_tarball':0, 'sshd_ppid':0})
         __UNLOCK_DB()
-        return (-1, 'txid already added')
-    database.append({'txid':txid, 'pubkey':pubkey, 'port':int(port), 'added': int(time.time()), 'is_logged_in_now':False, 'last_login_time':0, 'finished_banking':0, 'hash': '', 'escrow_fetched_tarball':0, 'sshd_ppid':0})
-    __UNLOCK_DB()
     
     akeys_file = open(authorized_keys, 'a')
     fcntl.flock(akeys_file, fcntl.LOCK_EX)
-    akeys_file.write('no-pty,no-agent-forwarding,no-user-rc,no-X11-forwarding,permitopen="localhost:'+port+'",command="/usr/bin/python '+os.path.join(installdir, 'stub.py')+' '+txid+'"'+' ssh-rsa '+pubkey+'\n')
+    akeys_file.write('no-pty,no-agent-forwarding,no-user-rc,no-X11-forwarding,permitopen="localhost:'+port+'",command="/usr/bin/python '+os.path.join(installdir, 'stub.py')+' '+txid+(" auditor" if isAuditor else "")+'"'+' ssh-rsa '+pubkey+'\n')
     fcntl.flock(akeys_file, fcntl.LOCK_UN)
     akeys_file.close()
       
@@ -556,6 +560,36 @@ def escrow_thread(conn, sshd_ppid):
                 print('Public key successfully added to database')
                 conn.send('Public key successfully added to database')
                 continue
+        
+        if cmd == 'add_auditor':
+          #OT feature. Add an auditor who can get a status of only one specific transaction
+            #format: add_auditor auditor_pubkey txid_to_be_audited
+            if len(paralist) != 2:
+                print('Session finished. Invalid amount of parameters')
+                conn.send('Session finished. Invalid amount of parameters')
+                time.sleep(1)
+                conn.close()
+                is_escrow_logged_in = False
+                return
+            auditorPubkey, txidToBeAudited = paralist
+            if len(auditorPubkey) > 1000 or len(txidToBeAudited) > 9:
+                print('Session finished. Faulty data for adding an auditor pubkey')
+                conn.send('Session finished. Faulty data for adding an auditor pubkey')
+                time.sleep(1)
+                conn.close()
+                is_escrow_logged_in = False
+                return
+            retval = escrow_add_pubkey(txid, pubkey, isAuditor=True)
+            if retval[0] == -1:
+                conn.send('Session finished. '+retval[1])
+                time.sleep(1)
+                conn.close()
+                is_escrow_logged_in = False
+                return
+            else:
+                print('Auditor\'s public key successfully added to database')
+                conn.send('Auditor\'s public key successfully added to database')
+                continue
                        
         if cmd == 'get_tarball':
             #format: get_tarball txid
@@ -678,12 +712,30 @@ if __name__ == "__main__":
             continue
         args = conn.recv(1024)
         arglist = args.split()
-        if len(arglist) != 2:
-            print('Session finished. Internal error. Did not receive two arguments as expected')
-            conn.send('Session finished. Internal error. Did not receive two arguments as expected')
+        if len(arglist) < 2 or len(arglist) > 3:
+            print('Session finished. Internal error. Did not receive either 2 or 3 arguments as expected')
+            conn.send('Session finished. Internal error. Did not receive either 2 or 3 arguments as expected')
             time.sleep(1)
             conn.close()
             continue
+        
+        if len(arglist) == 3:
+            #OpenTransaction's feature. auditor's connection. Return just one DB entry
+            txid, ppid, auditor_string = arglist
+            if auditor_string != 'auditor':
+                print('Session finished. Internal error. Expected the string auditor')
+                conn.send('Session finished. Internal error. Expected the string auditor')
+                time.sleep(1)
+                conn.close()
+                continue
+            db_str = get_database_as_a_string(txid)
+            conn.send('database ' + db_str)
+            print 'Database entry sent to auditor'
+            #allow stub.py to process socket data before sending the "finished" message
+            time.sleep(3)
+            cleanup_and_exit(conn, msg='Sent database to auditor')
+            return             
+        #else            
         arg1, arg2 = arglist
         if arg1 == 'escrow-id':
             thread = threading.Thread(target= escrow_thread, args=(conn, arg2))
@@ -692,6 +744,7 @@ if __name__ == "__main__":
         elif arg1 == 'ban':
             ban_user(arg2)
         else:
+            #regular user's connection arg1 contains txid, arg2 contains forked sshd's process's ID (to kill it from within the thread)
             thread = threading.Thread(target= thread_handle_txid, args=(conn, arg1, arg2))
             thread.daemon = True
             thread.start()
