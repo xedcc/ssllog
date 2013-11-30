@@ -27,6 +27,7 @@ import time
 import urllib2
 from xml.dom import minidom
 import zipfile
+import wingdbstub
 
 TESTING = False
 #ALPHA_TESTING means the users have to enter accno and sum themselves via FF addon
@@ -82,6 +83,9 @@ assigned_port = None
 username = "ubuntu"
 is_ff_started = False
 is_ssh_session_active = False
+hasSessionEndedSuccessfully = False
+OTmode = False
+OTargs = []
 
 #a thread which returns a value. This is achieved by passing self as the first argument to a called function
 #the calling function can then set self.retval
@@ -211,6 +215,7 @@ class buyer_HandlerClass(SimpleHTTPServer.SimpleHTTPRequestHandler, object):
                 self.send_header("value", "success")
                 print ('sending success',end='\r\n')
                 self.end_headers()
+                hasSessionEndedSuccessfully = True
                 return
             else:
                 self.send_response(200)
@@ -521,6 +526,17 @@ def start_firefox():
     os.putenv("FF_proxy_port", str(FF_proxy_port))
     #used to prevent addon's confusion when certain sites open new FF windows
     os.putenv("FF_first_window", "true")
+    if OTmode:
+        os.putenv("OTDNSName", OTargs["DNSName"])
+        os.putenv("OTGetUserURL", OTargs["getUserURL"])
+        os.putenv("OTListMetricsURL", OTargs["listMetricsURL"])
+        os.putenv("OTDescribeInstancesURL", OTargs["describeInstancesURL"])
+        os.putenv("OTDescribeVolumesURL", OTargs["describeVolumesURL"])
+        os.putenv("OTGetConsoleOutput", OTargs["getConsoleOutputURL"])
+        os.putenv("OTPublicEBSSnapshotID", OTargs["publicEBSSnapshotID"])
+        os.putenv("OTMode", "true")
+        with open(alphatest_key, 'w') as f:
+            f.write(OTargs["privateKey"]);
     
     print ("Starting a new instance of Firefox with Paysty's profile",end='\r\n')
     try:
@@ -876,6 +892,11 @@ def start_tunnel(privkey_file, oracle_address):
     
     
 if __name__ == "__main__": 
+    if len(sys.argv) == 10 and sys.argv[1] == 'OTmode':
+        OTmode = True
+        OTargs = {"DNSName":sys.argv[2], "getUserURL":sys.argv[3], "listMetricsURL":sys.argv[4], "describeInstancesURL":sys.argv[5], 
+         "describeVolumesURL":sys.argv[6], "getConsoleOutputURL":sys.argv[7], "publicEBSSnapshotID":sys.argv[8], "privateKey":sys.argv[9]}
+        
     if OS=='win':
         MessageBox = ctypes.windll.user32.MessageBoxA        
          
@@ -1042,4 +1063,6 @@ if __name__ == "__main__":
             request.get_method = lambda : 'HEAD'            
             urllib2.urlopen(request)
             break
+    if hasSessionEndedSuccessfully: exit(3)
+    else: exit(2)
         

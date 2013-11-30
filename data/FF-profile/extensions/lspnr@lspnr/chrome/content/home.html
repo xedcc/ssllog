@@ -83,16 +83,35 @@ function startPressed(){
 }
 
 function check_default_escrow(){
-    log("Checking oracle")
-    var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.");
-
-    var escrow_name = branch.getCharPref("default_escrow")
-    var dnsname = branch.getCharPref("escrow_"+escrow_name+".dnsname")
-    var getuserurl = branch.getCharPref("escrow_"+escrow_name+".getuserurl")
-    var listmetricsurl = branch.getCharPref("escrow_"+escrow_name+".listmetricsurl")
-    var describeinstancesurl = branch.getCharPref("escrow_"+escrow_name+".describeinstancesurl")
-    var describevolumesurl = branch.getCharPref("escrow_"+escrow_name+".describevolumesurl")
-    var getconsoleoutputurl = branch.getCharPref("escrow_"+escrow_name+".getconsoleoutputurl")
+    log("Checking oracle");
+    var dnsname;
+    var getuserurl;
+    var listmetricsurl;
+    var describeinstancesurl;
+    var describevolumesurl ;
+    var getconsoleoutputurl;
+    
+    if (Components.classes["@mozilla.org/process/environment;1"].getService(Components.interfaces.nsIEnvironment).get("OTMode") != "true"){
+    //Not an Open Transactions mode, get the oracle data from preference
+        var branch = Components.classes["@mozilla.org/preferences-service;1"].getService(Components.interfaces.nsIPrefService).getBranch("extensions.lspnr.");
+    
+        var escrow_name = branch.getCharPref("default_escrow")
+        dnsname = branch.getCharPref("escrow_"+escrow_name+".dnsname")
+        getuserurl = branch.getCharPref("escrow_"+escrow_name+".getuserurl")
+        listmetricsurl = branch.getCharPref("escrow_"+escrow_name+".listmetricsurl")
+        describeinstancesurl = branch.getCharPref("escrow_"+escrow_name+".describeinstancesurl")
+        describevolumesurl = branch.getCharPref("escrow_"+escrow_name+".describevolumesurl")
+        getconsoleoutputurl = branch.getCharPref("escrow_"+escrow_name+".getconsoleoutputurl")
+    }
+    else {
+    //Open Transactions mode, get oracle data from env vars
+         dnsname = Components.classes["@mozilla.org/process/environment;1"].getService(Components.interfaces.nsIEnvironment).get("OTDNSName");
+         getuserurl = Components.classes["@mozilla.org/process/environment;1"].getService(Components.interfaces.nsIEnvironment).get("OTGetUserURL");
+         listmetricsurl = Components.classes["@mozilla.org/process/environment;1"].getService(Components.interfaces.nsIEnvironment).get("OTListMetricsURL");
+         describeinstancesurl = Components.classes["@mozilla.org/process/environment;1"].getService(Components.interfaces.nsIEnvironment).get("OTDescribeInstancesURL");
+         describevolumesurl = Components.classes["@mozilla.org/process/environment;1"].getService(Components.interfaces.nsIEnvironment).get("OTDescribeVolumesURL");
+         getconsoleoutputurl = Components.classes["@mozilla.org/process/environment;1"].getService(Components.interfaces.nsIEnvironment).get("OTGetConsoleOutputURL");
+    }
     base64string = btoa(getuserurl+" "+listmetricsurl+" "+describeinstancesurl+" "+describevolumesurl+" " + getconsoleoutputurl +" "+ dnsname)
 
     reqCheckEscrow = new XMLHttpRequest();

@@ -1,0 +1,10 @@
+<keysets>
+
+<item status="Pending registration"
+label="default label"
+userSSHKey="a very long string"
+userPrivKey="an even longer line"
+judgeSSHKey="a very long string"
+judgePrivKey="an even longer line"/>
+
+</keysets>
