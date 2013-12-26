@@ -73,7 +73,7 @@ The default ec2-api-tools that come with 12.04 are obsolete, we need to force in
 </bash>
 Then run:
 
-ec2-run-instances ami-35258228 -t t1.micro -z us-east-1a -b /dev/sda1=none -b /dev/sda2=snap-81a54469::false:standard -O <Access Key ID> -W <Secret Access Key>
+ec2-run-instances ami-35258228 -t t1.micro --region sa-east-1 -b /dev/sda1=none -b /dev/sda2=snap-81a54469::false:standard -O <Access Key ID> -W <Secret Access Key>
 
 Make sure that:
   EC2 security group allows inbound connections to TCP port 22. The rule must look like: Port range: 22, Source: 0.0.0.0/
