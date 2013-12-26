@@ -124,6 +124,7 @@ FOR VERIFIERS: HOW TO CHECK THAT THE SNAPSHOT CONTENTS WAS NOT MALICIOUSLY MODIF
 Repeat all the steps described in "HOW TO CREATE AN ORACLE EBS SNAPSHOT" but don't create a public snapshot.
 Attach the resulting volume to a running instance as /dev/sdg
 Create a volume from oracle public EBS snapshot and attach it to /dev/sdh
+After that, run from within the instance
 <bash>
   sudo -s
   mount /dev/xvdg /mnt/disk1
@@ -157,7 +158,7 @@ Using the GET URLs made public by escrow, make sure that the following requireme
 
 1.	In DescribeInstances URL (DIURL):
   "dnsName" matches the DNS name of the oracle
-  "imageID" is "ami-d0f89fb9"
+  "imageID" is "ami-35258228"
   "instanceState""name" is "running"
   "rootDeviceName" is "/dev/sda1"
   in "blockDeviceMapping" there should be ONLY ONE "item" with "deviceName" "/dev/sda2", "ebs""status" is "attached"
@@ -166,14 +167,13 @@ Using the GET URLs made public by escrow, make sure that the following requireme
 2.	In DescribeVolumes URL (DVURL): 
   "volumeId" matches "ebs""volumeId" from DIURL
   "snapshotId" matches a public snaphot ID which has been verified using the above instructions -
-  "FOR VERIFIERS: HOW TO CHECK THAT THE SNAPSHOT CONTENTS WAS NOT MALICIOUSLY MODIFIED."
   "status" is "in-use"
   "volumeType" is "standard"
   "attachmentSet""item""volumeId" matches "ebs""volumeId" from DIURL
   "attachmentSet""item""instanceId" matches "instanceId" from DIURL
-  "attachmentSet""item""device" is "/dev/sd2"
+  "attachmentSet""item""device" is "/dev/sda2"
   "attachmentSet""item""status" is "attached"
-  "attachmentSet""item""attachTime" matches "createTime" and matches "ebs""attachTime" from DIURL
+  "attachmentSet""item""attachTime" matches "createTime" and matches "ebs""attachTime" from DIURL (ignore the millisecond difference)
   "attachmentSet""item""attachTime" was attached on the same minute as & no later than 3 seconds from "launchtime" from DIURL 
 
 3.	In GetConsoleOutput URL:
