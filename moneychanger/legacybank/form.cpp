@@ -386,31 +386,7 @@ void Form::slotQueryOracleMachine(){
   //these variables must be sourced from the contract's text
 
   QString privateKey = "-----BEGIN RSA PRIVATE KEY-----\n"
-      "MIIEpAIBAAKCAQEA1wYBamyURAQNKi3eHEcUxJyxB6RmozYbj8sBgDKMASUW85ri\n"
-      "+BcQKJ4OdUapBlYAG7ioKOpIV6XhpffLUr65++/lmZMpzj/shefIAl7K8qX4wS9Q\n"
-      "0Vpmv894gs3uA43HGbuHfpVrhabCqEj2zW8okq7iOKpL1U7HY+i9zEccpzwG3/EK\n"
-      "3kFvVOYsnA4uD4PClMPYU7w2lOij6Z1hxfaxDKeR7Xh96zlW72zL0h46eDRSBP8Y\n"
-      "05ZYNpB3cPRkgeJzH3WpcLVCSLuQH/0S9bA2KJvC7zXZsTRiJTkbAxr89O9cJ1F/\n"
-      "L6RcjVPe3Pj0UnP7g+CmWal5GsG7f5BQNzyBeQIDAQABAoIBAFAKwEQpnxeimnP1\n"
-      "FxVXsHdwDMZXgI2I+sGQRELAjjVu5RhRs+O+UhmMnL0zTIA7S1cGajKw47Uc3t61\n"
-      "W062CO2r48BDc/B/A0DlgyK+vrWM6wie4GrOSClmxemLVuqjwFXn5QxN+vSJmzSh\n"
-      "1J2sn2HbEAMgAZKp/LdIUD7WyefGVdPXSM2urrp4eT0ScpzHxpQohXcwdGnACkod\n"
-      "hq65TiB8C6m0Qq5fSYla5jsiJGsDoDJ6V+5gUQnnJr7LQp/3rjAMoXlUeQQT12mW\n"
-      "NcHmeBaJcFeWsN8u/cGncpgmcRF/r4Rn/37rFLeZXb8oRLptQANTvS10Je+y2Bre\n"
-      "rEitsgECgYEA8nIyiV5buT0a9SmzCJ0gnHRZUAjJkGzfryb4IvYlk3kFsHqp4BgY\n"
-      "zWnOHCfVlteG/IjPnUL7YQxKh6w/SHx3uzwZxo6njQ92HUuNGEGL2aJqQ0+wFtzg\n"
-      "XhIBg9L09zR+trZNXaHuMVBUMZU9UwsWxsR0CA1rFlTBHpQwvWKWEUkCgYEA4wtY\n"
-      "YEm20mnRz0AzRjHZGlUlIdZIHMtEeZXx7HS7sydQ/rpfrMgmtVYPA2HVIZRrkZyl\n"
-      "ko8iNlAXALScPvOjPBv+j9ZywcSog0TI+KVSo1LtTWlNV9FZdnKck+BYS23pOieb\n"
-      "yNTqIvu1CGaFURR4gW2pTr6RNQX2dRFqKO/UHrECgYEAnMeUPpiyH9uP7zIEAHH7\n"
-      "gLEMgGDuV2LQU2eT1qfuLKt6LmFkMPHkOBFPo41u5ZiCRhQCjeOew2c7WvjcA3fZ\n"
-      "xU5cLLZbSzDQZKlSmHjqgtYweU6yxFYZETv7ls94cdOUjXreFMp+SY10pIupmGX3\n"
-      "WJn5nqtusIYmTCvwSMfT22ECgYEAgbBKU/3nQzuUz/iREUiKBYObST+4Q1JMk9L1\n"
-      "tKZdTRFpL4fP/Mb7bVtyCfGJJ7w60ZsT7Kp71WBcM1f3Y/IRTNWEzC6nsE0gIJNa\n"
-      "5MSydn549F3xAvefTYxcKg/c/4ER1tknIEmWUFNM7jZ5cn3p86xrKIKsOQhl5isD\n"
-      "Y8zScpECgYBfy6GqfrGiY4xvakQ8xTj1XGty9koOTtYgNgXFdnBsElIWzUTdJBdF\n"
-      "kpKzTOEYrY2LbKkB70FlbIkN7gjAPMD2V9UckGjmE3E6qtOtd4ljWSSW+9GaIRwQ\n"
-      "aWRsjUtDYEZlzEmnT6yUT9skDOvdP3T3e7d6AsB0xRKHzGGdDSCeqg==\n"
+
       "-----END RSA PRIVATE KEY-----";
   ofstream privkeyFile;
   privkeyFile.open("/tmp/priv.key");
