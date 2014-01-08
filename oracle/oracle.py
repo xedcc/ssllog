@@ -3,6 +3,7 @@ import fcntl
 import hashlib
 import os
 import random
+import re
 import shutil
 import signal
 import SimpleHTTPServer                
@@ -44,7 +45,7 @@ database = []
 #database fields
 
 #'txid':   unique 9-digit id assigned by the escrow for a particular BTC transaction.
-#'pubkey': RSA public key which the user generates, gives to the escrow, and the escrow adds it to the oracle's authorized keys file. Allows to ssh into the oracle.
+#'pubkey': SSH2-formatted RSA public key which the user generates, gives to the escrow, and the escrow adds it to the oracle's authorized keys file. Allows to ssh into the oracle.
 #'port':   a random port on the oracle server used for ssh port forwarding. If at the time of banking session this port happens to be occupied, a new random port will be generated, authkeysfile will be updated to use that port and the user will be asked to login again.
 #'added':  time when the escrow added this pubkey to the oracle.
 #'is_logged_in_now': whether the user is having an active ssh session. Used to prevent multiple ssh sessions by the same user.
@@ -54,120 +55,146 @@ database = []
 #'escrow_fetched_tarball': time when the escrow successfully fetched the tarball and confirmed that the tarball's hash matched or 0 otherwise.
 #'sshd_ppid': PID of the fork()ed sshd which started stub.py. Used to detect stale sessions after the user disconnects abruptly.
 
+escrow_magic_port = 40123
+#user & auditor magic are used in authkeysfile to show that no proper forwarding
+#port has been assigned yet
+user_magic_port = 123
+auditor_magic_port = 456
+#list of ports that should not be assigned when choosing a random port
+reserved_ports = [escrow_magic_port]
+
 installdir = os.path.dirname(os.path.realpath(__file__))
 stcppipe_logdir = os.path.join(installdir, 'stcppipelog')
 authorized_keys = os.path.join(installdir, '.ssh', 'authorized_keys')
 
-#host and port to which the oracle will POST the tarball
-escrow_host = None
-escrow_port = None
 is_escrow_registered = False
 is_escrow_logged_in = False
 escrow_last_sshd_ppid = 0
 
 db_lock_path = os.path.join(installdir, 'db.lock')
 db_lock_fd = open(db_lock_path, 'w')
+ports_lock_path = os.path.join(installdir, 'ports.lock')
+ports_lock_fd = open(ports_lock_path, 'w')
 
-def __LOCK_DB():
+def LOCK_DB():
     global db_lock_fd
     fcntl.flock(db_lock_fd, fcntl.LOCK_EX)
     
-def __UNLOCK_DB():
+def UNLOCK_DB():
     global db_lock_fd
     fcntl.flock(db_lock_fd, fcntl.LOCK_UN)
+    
+def LOCK_PORTS():
+    global ports_lock_fd
+    fcntl.flock(ports_lock_fd, fcntl.LOCK_EX)
+    
+def UNLOCK_PORTS():
+    global ports_lock_fd
+    fcntl.flock(ports_lock_fd, fcntl.LOCK_UN)
 
-#get txid index in the database and optionally ban it
-#Optionally allows not to lock the database if the calling process is already holding the lock
-def get_txid_index_in_db(txid, lock=True, ban=False):
-    if lock: __LOCK_DB()
+
+
+#get txid index in the database and 
+#the database must be locked by the calling process
+def get_txid_index_in_db(txid):
     found_index = -1
     for index,item in enumerate(database):
         if item['txid'] == txid:
             found_index = index
             break
-    if ban==True and found_index != -1:
-        database[index]['finished_banking'] = -1
-    if lock: __UNLOCK_DB()
     return found_index
 
  
 def get_database_as_a_string(txid):
     iostr = StringIO.StringIO()
-    __LOCK_DB()
-    if get_txid_index_in_db(txid, lock=False) == -1:
-        __UNLOCK_DB()
-        return 'txid does not exist in database'
+    LOCK_DB()
+    if txid != 'escrow-id':
+        if get_txid_index_in_db(txid) == -1:
+            UNLOCK_DB()
+            return 'txid does not exist in database'
     iostr.write(database)
-    __UNLOCK_DB()
+    UNLOCK_DB()
     retval = iostr.getvalue()
     if txid == "escrow-id":
         return retval
     else:
         return retval[ retval.rfind( "{", 0, retval.find("'txid': '"+txid+"'") ) : retval.find( "}", retval.find("'txid': '"+txid+"'") ) ]
 
-def escrow_add_pubkey(txid, pubkey, port=2134, isAuditor=False):
-    if not isAuditor:
-        #make sure the txid is not in the db already
-        __LOCK_DB()
-        index = get_txid_index_in_db(txid, lock=False)
-        if index >= 0:
-            __UNLOCK_DB()
-            return (-1, 'txid already added')
-        database.append({'txid':txid, 'pubkey':pubkey, 'port':int(port), 'added': int(time.time()), 'is_logged_in_now':False, 'last_login_time':0, 'finished_banking':0, 'hash': '', 'escrow_fetched_tarball':0, 'sshd_ppid':0})
-        __UNLOCK_DB()
+
+def escrow_add_auditor(txid, auditorPubkey, txidToBeAudited):
+    #make sure the txid is not in the db already
+    LOCK_DB()
+    index = get_txid_index_in_db(txid)
+    if index >= 0:
+        UNLOCK_DB()
+        return ('txid already exists')
+    #make sure the same pubkey is not added twice
+    for item in database:
+        if item['pubkey'] == auditorPubkey:
+            UNLOCK_DB()
+            return ('pubkey already exists')   
     
+    database.append({'txid':txid, 'pubkey':auditorPubkey, 'port':auditor_magic_port, 'added': int(time.time()), 'is_logged_in_now':False, 'last_login_time':0, 'finished_banking':0, 'hash': '', 'escrow_fetched_tarball':0, 'sshd_ppid':0})
+    UNLOCK_DB()
     akeys_file = open(authorized_keys, 'a')
     fcntl.flock(akeys_file, fcntl.LOCK_EX)
-    akeys_file.write('no-pty,no-agent-forwarding,no-user-rc,no-X11-forwarding,permitopen="localhost:'+port+'",command="/usr/bin/python '+os.path.join(installdir, 'stub.py')+' '+txid+(" auditor" if isAuditor else "")+'"'+' ssh-rsa '+pubkey+'\n')
+    akeys_file.write('no-pty,no-agent-forwarding,no-user-rc,no-X11-forwarding,permitopen="localhost:'+str(escrow_magic_port)+'",command="/usr/bin/python '+os.path.join(installdir, 'stub.py')+' '+txid+' audit '+txidToBeAudited+'"'+' ssh-rsa '+pubkey+'\n')
     fcntl.flock(akeys_file, fcntl.LOCK_UN)
     akeys_file.close()
-      
-    return(0,'')
-                            
+    return('success')
+
+
+
+def escrow_add_pubkey(txid, pubkey):
+    #make sure the txid is not in the db already
+    LOCK_DB()
+    index = get_txid_index_in_db(txid)
+    if index >= 0:
+        UNLOCK_DB()
+        return ('txid already added')
+    #make sure the same pubkey is not added twice
+    for item in database:
+        if item['pubkey'] == pubkey:
+            UNLOCK_DB()
+            return ('pubkey already added')   
     
-def escrow_get_tarball(txid):
-    __LOCK_DB()
-    index = get_txid_index_in_db(txid, lock=False)
+    database.append({'txid':txid, 'pubkey':pubkey, 'port':user_magic_port, 'added': int(time.time()), 'is_logged_in_now':False, 'last_login_time':0, 'finished_banking':0, 'hash': '', 'escrow_fetched_tarball':0, 'sshd_ppid':0})
+    UNLOCK_DB()
+    akeys_file = open(authorized_keys, 'a')
+    fcntl.flock(akeys_file, fcntl.LOCK_EX)
+    akeys_file.write('no-pty,no-agent-forwarding,no-user-rc,no-X11-forwarding,permitopen="localhost:'+str(user_magic_port)+'",command="/usr/bin/python '+os.path.join(installdir, 'stub.py')+' '+txid+' login'+'"'+' ssh-rsa '+pubkey+'\n')
+    fcntl.flock(akeys_file, fcntl.LOCK_UN)
+    akeys_file.close()
+    return('success')
+                            
+#used by escrow when issuing get_tarball command
+def check_tarball_availability(txid):
+    LOCK_DB()
+    index = get_txid_index_in_db(txid)
     if index < 0:
-        __UNLOCK_DB()
-        return (-1, 'txid does not exist')
+        UNLOCK_DB()
+        return ('does not exist')
     has_finishes_session = database[index]['finished_banking']
     is_sent_to_escrow = database[index]['escrow_fetched_tarball']
-    tarball_hash = database[index]['hash']
-    __UNLOCK_DB()
+    UNLOCK_DB()
     
     if not has_finishes_session:
-        return (-1, 'user has not yet finished their banking session')
+        return ('user has not yet finished their banking session')
     if is_sent_to_escrow == True:
-        return (-1, 'tarball already sent to escrow')
-    else:
-        try:
-            #POST the tarball to escrow with custom headers, so that escow could check the hash and respond with 500 if hash mismatched
-            http_code = subprocess.check_output(['curl', '--write-out', '%{http_code}', '--silent', '-F', 'localfile=@'+os.path.join(stcppipe_logdir, txid+'.tar'), escrow_host+':'+str(escrow_port), '-H', 'escrow-filename:'+txid+'.tar', '-H', 'escrow-hash:'+tarball_hash ])
-        except:
-            return (-1, "Error POSTing the tarball to escrow's server")
-    if http_code == 500:
-        return (-1, 'Escrow reported hash mismatch')        
-      
-    __LOCK_DB()  
-    index = get_txid_index_in_db(txid, lock=False)
-    if index < 0:
-        __UNLOCK_DB()
-        return (-1, 'txid does not exist even though it existed just a second ago')
-    
-    database[index]['escrow_fetched_tarball'] = int(time.time())
-    __UNLOCK_DB()
-    #Now that escrow confirmed safe receipt of the tarball, remove the tarball
-    os.remove(os.path.join(stcppipe_logdir, txid+'.tar'))
-    return (0,'')
+        return ('tarball already sent to escrow')
+    else:    
+        return ('available')
 
 
-def cleanup_and_exit(conn, txid=0,  msg=''):
-    if txid !=0:
-        __LOCK_DB()        
-        index = get_txid_index_in_db(txid, lock=False)
+def cleanup_and_exit(conn,  msg='', txid=0):
+    if txid == 'escrow-id':
+        global is_escrow_logged_in
+        is_escrow_logged_in = False
+    elif txid !=0:
+        LOCK_DB()        
+        index = get_txid_index_in_db(txid)
         if index < 0:
-            __UNLOCK_DB()            
+            UNLOCK_DB()            
             print('Session finished. Transaction ID not found in database')
             conn.send('Session finished. Transaction ID not found in database')
             time.sleep(1)
@@ -175,7 +202,7 @@ def cleanup_and_exit(conn, txid=0,  msg=''):
             return
         is_logged_in = database[index]['is_logged_in_now']
         database[index]['is_logged_in_now'] = False
-        __UNLOCK_DB()
+        UNLOCK_DB()
         if is_logged_in == False:
             print('Session finished. Internal error. User was already logged out')
             conn.send('Session finished. Internal error. User was already logged out')
@@ -186,105 +213,150 @@ def cleanup_and_exit(conn, txid=0,  msg=''):
     conn.send('Session finished. ' + msg)
     time.sleep(1)
     conn.close()
-      
-               
-def thread_handle_txid(conn, txid, sshd_ppid):
-    __LOCK_DB
-    index = get_txid_index_in_db(txid, lock=False)
-    if index < 0:
-        __UNLOCK_DB()
-        cleanup_and_exit(conn, msg='Transaction ID not found in database')
+    return
+
+
+#change the forwarding port in authkeysfile for user or auditor
+def update_authkeysfile_with_port(txid, newport):
+    #we use 2 file descriptors to open the file for reading and writing. The lock is held on the reading file descriptor
+    fd_read = open(authorized_keys, 'r')
+    fcntl.flock(fd_read, fcntl.LOCK_EX)
+    filedata = fd_read.read()
+    lines = filedata.split('\n')
+    is_found_in_authkeys = False
+    for index,line in enumerate(lines):
+        if line.count(txid+' login') == 1or line.count(txid+'audit') == 1:
+            line = re.sub('permitopen="localhost:.*"', 'permitopen="localhost:'+str(newport)+'\"', line)
+            lines.pop(index)
+            lines.insert(index, line)
+            is_found_in_authkeys = True
+            break
+    if not is_found_in_authkeys:
+        fcntl.flock(fd_read, fcntl.LOCK_UN)
+        fd_read.close()
+        return('txid not found in authkeysfile')
+    fd_write = open(authorized_keys, 'w')
+    for line in lines:
+        fd_write.write(line+'\n')  
+    fd_write.close()
+    fcntl.flock(fd_read, fcntl.LOCK_UN)
+    fd_read.close()
+    return ('success')
+
+
+#gets a new port from a pool of free system ports
+def get_new_port():
+    LOCK_PORTS()
+    while True:
+        newport = random.randint(1025,65535)
+        if not newport in reserved_ports: break
+    reserved_ports.append(newport)
+    UNLOCK_PORTS()
+    return newport
+
+def release_port(port):
+    LOCK_PORTS()
+    try:
+        reserved_ports.remove(port)
+    except:
+        #it is too cumbersome to notify the calling thread of the exception
+        UNLOCK_PORTS()
         return
-           
-    port = None
-    is_logged_in = None
-    
+    UNLOCK_PORTS()
+
+              
+def user_thread(conn, txid, sshd_ppid):
+    LOCK_DB()
+    index = get_txid_index_in_db(txid)
+    if index < 0:
+        UNLOCK_DB()
+        cleanup_and_exit(conn, 'Transaction ID not found in database')
+        return
     is_logged_in = database[index]['is_logged_in_now']
     prev_sshd_ppid = database[index]['sshd_ppid']
-
     if is_logged_in:
-        #check for a stale session from prevous login
+        #check for a stale session from previous login
         try:
             os.kill(prev_sshd_ppid, 0)
             #we get here if there was no exception
-            __UNLOCK_DB()
-            cleanup_and_exit(conn, msg='This user is already logged in', txid=txid)
+            UNLOCK_DB()
+            cleanup_and_exit(conn, 'This user is already logged in')
             return
         except OSError:
-            #The PID is no longer running, i.e. we have a stale session, leave is_logged_in in True and move on
+            #The PID is no longer running, i.e. not a stale session, leave is_logged_in in True and move on
             pass
     
     finished_banking = database[index]['finished_banking']          
     database[index]['is_logged_in_now'] = True
     database[index]['sshd_ppid'] = int(sshd_ppid)
+    prev_login_time = database[index]['last_login_time']
     database[index]['last_login_time'] = int(time.time())
     #Copy the vars which we'll need later, so we don't have to lock db again later
     port = database[index]['port']
-    __UNLOCK_DB()
+    UNLOCK_DB()
     
-    if not ALPHA_TESTING:
-        if finished_banking:
-            #if the user has finished the banking session, it is assumed that he logs in to audit the database
-            db_str = get_database_as_a_string(txid)
-            print 'Database sent to user'
-            conn.send('database ' + db_str)
-            #allow stub to process socket data before sending the "finished" message
-            time.sleep(3)
-            cleanup_and_exit(conn, msg='Sent database to user', txid=txid)
+    #else if not the very first login
+    if not ALPHA_TESTING and finished_banking != 0:
+        #if the user has finished the banking session, his only business here is to get a copy of his db entry
+        db_str = get_database_as_a_string(txid)
+        conn.send('database ' + db_str)
+        #allow stub to process socket data before sending the "finished" message
+        time.sleep(3)
+        cleanup_and_exit(conn, 'Sent database to user', txid)
+        return
+    
+    if int(time.time()) - prev_login_time > 60:
+        #this is either user's very first login or a non-first login and there was a failure to get the tracefile
+        #on the previous attempt (timeout of 60 secs expired)
+        #Generate a new forwarding port and tell the user to reconnect to this new port
+        newport = get_new_port()
+        conn.send('Please reconnect and use the following port for forwarding: '+str(newport))
+        #wait for an ACK and disconnect
+        rv = receive_ACK(conn)
+        if rv != 'success':
+            #the user didn't send back an ACK, assume there was a network problem and release the port
+            release_port(newport)
+            cleanup_and_exit(conn, rv, invoking_txid)
             return
+        #else ACK received
+        rv = update_authkeysfile_with_port(txid, newport)
+        if rv != 'success':
+            release_port(newport)
+            cleanup_and_exit(conn, rv, invoking_txid)
+            return
+        LOCK_DB()
+        index = get_txid_index_in_db(txid)
+        if index < 0:
+            UNLOCK_DB()
+            cleanup_and_exit(conn, 'Transaction ID not found in database')
+            return
+        #else txid index found
+        database[index]['port'] = newport
+        UNLOCK_DB()
+        cleanup_and_exit(conn, 'Authkeys file entry successfully changed', txid)
+        return
     
-    #setup to perform banking audit  
-    if not os.path.isdir(stcppipe_logdir): os.mkdir(stcppipe_logdir)
+    #else if not the first login, then setup to perform banking audit  
+    if not os.path.isdir(stcppipe_logdir): 
+        #the very first session for this oracle machine
+        os.mkdir(stcppipe_logdir)
     logdir = os.path.join(stcppipe_logdir, txid)
-    if os.path.isdir(logdir): shutil.rmtree(logdir)
+    if os.path.isdir(logdir): 
+        #may happen if user aborted the previous session half-way and is now retrying
+        shutil.rmtree(logdir)
     os.mkdir(logdir)
     start_time = int(time.time())
     stcppipe_proc = subprocess.Popen([os.path.join(installdir, 'stcppipe'), '-d', logdir, '-b', '127.0.0.1', '3128', str(port)])
-    #if stcppipe returns with returncode 1 , it means that the port is in use. Very unlikely but possible
     time.sleep(1)
     if stcppipe_proc.poll() == 1:
-        #modfy authkeys file and ask user to reconnect on a different random port
-        newport = random.randint(1025,65535)
-        #we use 2 file descriptors to open the file for reading and writing. The lock is held on the reading file descriptor
-        fd_read = open(authorized_keys, 'r')
-        fcntl.flock(fd_read, fcntl.LOCK_EX)
-        filedata = fd_read.read()
-        lines = filedata.split('\n')
-        is_found_in_authkeys = False
-        for index,line in enumerate(lines):
-            if line.count(txid) != 0:
-                line = line.replace(str(port),str(newport))
-                lines.pop(index)
-                lines.insert(index, line)
-                is_found_in_authkeys = True
-                break
-        if not is_found_in_authkeys:
-            cleanup_and_exit(conn, msg='Internal error. The txid was not found in authorized keys file', txid=txid)
-            fcntl.flock(fd_read, fcntl.LOCK_UN)
-            fd_read.close()
-            return
-        fd_write = open(authorized_keys, 'w')
-        for line in lines:
-            fd_write.write(line+'\n')  
-        fd_write.close()
-        fcntl.flock(fd_read, fcntl.LOCK_UN)
-        fd_read.close()
-        
-        __LOCK_DB
-        index = get_txid_index_in_db(txid, lock=False)
-        if index < 0:
-            __UNLOCK_DB()
-            cleanup_and_exit(conn, msg='Transaction ID not found in database')
-            return
-        database[index]['port'] = newport
-        __UNLOCK_DB
-    
-        cleanup_and_exit(conn, msg='Please reconnect and use port '+str(newport)+' for forwardng', txid=txid)
+        #if stcppipe returns with returncode 1 , it means that there was some error.
+        #This definitely can't be "address in use" because we reserve forwarding ports in advance, so that 
+        #two threads cannot claim the same port
+        release_port(port)
+        cleanup_and_exit(conn, 'There was an unknown error in stcppipe', txid)
         return
-    
     conn.send('Tunnel ready')
         
-    
     #wait for sslkey from the user
     last_dos_check = start_time
     conn.settimeout(1 if TESTING else 10)
@@ -301,10 +373,11 @@ def thread_handle_txid(conn, txid, sshd_ppid):
             os.kill(stcppipe_proc.pid, signal.SIGTERM)
             time.sleep(3)
             if os.path.isdir(logdir): shutil.rmtree(logdir)
-            cleanup_and_exit(conn, msg='Time limit expired. Connection closed', txid=txid)
+            release_port(port)
+            cleanup_and_exit(conn, 'Time limit expired. Connection closed', txid)
             return
         
-        #Anti DOS measure. Every minute make sure the user is not overwhelming the logdir with data or new files(generated on every new connection). Limits: 1000 files or 50MB of data
+        #Anti DOS measure. Every minute make sure the user is not overwhelming the logdir with data or new files(generated on every new  SSL connection). Limits: 1000 files or 50MB of data
         if current_time-last_dos_check > 60:
             last_dos_check = current_time
             if os.path.isdir(logdir):
@@ -314,7 +387,8 @@ def thread_handle_txid(conn, txid, sshd_ppid):
                     os.kill(stcppipe_proc.pid, signal.SIGTERM)
                     time.sleep(3)
                     if os.path.isdir(logdir): shutil.rmtree(logdir)
-                    cleanup_and_exit(conn, msg='You have been banned. Contact escrow for details')
+                    release_port(port)
+                    cleanup_and_exit(conn, 'You have been banned. Contact escrow for details')
                     return
         
         if msg_in: 
@@ -326,12 +400,13 @@ def thread_handle_txid(conn, txid, sshd_ppid):
                     sslkey = msg_in[len(txid+'-cmd sslkey '):]
                     if len(sslkey) > 180:
                         shutil.rmtree(logdir)
-                        cleanup_and_exit(conn, msg='Wrong sslkey length', txid=txid)
+                        cleanup_and_exit(conn, 'Wrong sslkey length', txid)
                         return                       
                     sslkey_fd = open(os.path.join(logdir,'sslkey'), 'w')
                     sslkey_fd.write(sslkey+'\n')
                     sslkey_fd.close()
                 
+                release_port(port)
                 finish_time = int(time.time())                
                 tar_path = os.path.join(stcppipe_logdir, txid+'.tar')
                 subprocess.call(['tar', 'cf', tar_path, '-C', logdir, '.'])
@@ -339,53 +414,50 @@ def thread_handle_txid(conn, txid, sshd_ppid):
                 output = subprocess.check_output(['sha256sum', tar_path])
                 sha_hash = output.split()[0]
                 
-                __LOCK_DB()
-                index = get_txid_index_in_db(txid, lock=False)
+                LOCK_DB()
+                index = get_txid_index_in_db(txid)
                 if index < 0:
-                    __UNLOCK_DB()
-                    cleanup_and_exit(conn, msg='Transaction ID not found in database')
+                    UNLOCK_DB()
+                    cleanup_and_exit(conn, 'Transaction ID not found in database')
                     return
-                
                 database[index]['finished_banking'] = finish_time
                 database[index]['hash'] = sha_hash
-                __UNLOCK_DB()
+                UNLOCK_DB()
                 
                 if ALPHA_TESTING:
                     #ALPHA ONLY: expect the user to request the tarball
                     #setup a mini http server and listen for GET requests
                     print ('Starting mini http server')
                     try:
-                        #serve files ralative to root dir
+                        #serve files relative to root dir
                         os.chdir(installdir)
                         httpd = StoppableHttpServer(('127.0.0.1', port), HandlerClass)
                         httpd.arg_in = txid
                     except Exception, e:
-                        print ('Error starting mini http server')
                         os.remove(os.path.join(stcppipe_logdir, txid+'.tar'))                    
-                        cleanup_and_exit(conn, msg='Error starting mini http server', txid=txid)
+                        cleanup_and_exit(conn, 'Error starting mini http server', txid)
                         return
                     starttime = time.time()
                     while not httpd.stop:
                             httpd.handle_request()
                             #we get here when timeout=1 triggers
-                            if time.time() - starttime > 120:
-                                print ('Tarball not requested in 2 mins')
+                            if time.time() - starttime > 60:
                                 os.remove(os.path.join(stcppipe_logdir, txid+'.tar'))                            
-                                cleanup_and_exit(conn, msg='Tarball not requested in 2 mins', txid=txid)
+                                cleanup_and_exit(conn, 'Tarball not requested in 1 mins', txid)
                                 return
                     #now wait for user to send exit success or exit failure
-                    continue
-                        
-                
-                cleanup_and_exit(conn, msg='Session ended successfully ', txid=txid)
+                    continue                        
+                #else if not ALPHA
+                cleanup_and_exit(conn, 'Session ended successfully', txid)
                 return
             
             if not ALPHA_TESTING:
                 if msg_in == txid+'-cmd exit':
                     os.kill(stcppipe_proc.pid, signal.SIGTERM)
                     time.sleep(3)
-                    shutil.rmtree(logdir)
-                    cleanup_and_exit(conn, msg='User initiated shutdown', txid=txid)
+                    if os.path.isdir(logdir): shutil.rmtree(logdir)
+                    release_port(port)
+                    cleanup_and_exit(conn, 'User initiated shutdown', txid)
                     return
             
             if ALPHA_TESTING:
@@ -393,36 +465,171 @@ def thread_handle_txid(conn, txid, sshd_ppid):
                     result = None
                     result_in_list = msg_in[len(txid+'-cmd exit'):].split()
                     if len(result_in_list) == 0:
-                        #user just sent "exit"
+                        #user sent only half the message - "exit" without "success"/"failure"
                         os.kill(stcppipe_proc.pid, signal.SIGTERM)                    
                         if os.path.isdir(logdir): shutil.rmtree(logdir)                    
-                        cleanup_and_exit(conn, msg='User terminated abruptly', txid=txid)
+                        cleanup_and_exit(conn, 'User terminated abruptly', txid)
                         return  
                     else:
                         result = result_in_list[0]
                     dbresult = 1 if (result == 'success') else -1
-                    __LOCK_DB
-                    index = get_txid_index_in_db(txid, lock=False)
+                    LOCK_DB
+                    index = get_txid_index_in_db(txid)
                     database[index]['escrow_fetched_tarball'] = dbresult
-                    __UNLOCK_DB
-                    
-                    cleanup_and_exit(conn, msg='User initiated shutdown', txid=txid)
+                    UNLOCK_DB
+                    cleanup_and_exit(conn, 'User initiated shutdown', txid)
                     return                
-                
-                
+                                
             else:
                 os.kill(stcppipe_proc.pid, signal.SIGTERM)
                 time.sleep(3)
                 if os.path.isdir(logdir): shutil.rmtree(logdir)
-                cleanup_and_exit(conn, msg='Unknown command received. Expected "sslkey or exit"', txid=txid)
+                release_port(port)
+                cleanup_and_exit(conn, 'Unknown command received. Expected "sslkey or exit"', txid)
                 return
     
+
+#wait for client to send ACK and return success
+def receive_ACK(conn):
+    conn.settimeout(1)
+    starttime = time.time()
+    msg_in = None
+    while 1:
+        try:
+            #this will throw an exception every second
+            msg_in = conn.recv(1024)
+        except:
+            #timeout reached
+            pass
+        current_time = int(time.time())
+        if current_time-start_time > 10:
+            #the user didn't send back an ACK, assume there was a network problem
+            return ('Failed to receive ACK in due time')
+        if msg_in:
+            if msg_in != 'ACK':
+                return ( 'Expected \'ACK\' but instead received '+msg_in)
+            else:
+                #ACK received
+                return ('success')
+
+
+#This thread gives auditor one minute to fetch the tarball
+#The auditor has to login like ssh -R 22222:localhost:11111 and then do wget localhost:11111/somefile
+#where 11111 is an arbitrary local port and 22222 was assigned to auditor by sshd on previous login
+
+def auditor_thread(conn, invoking_txid, txid_of_tracefile, ppid):
+    LOCK_DB()
+    index = get_txid_index_in_db(invoking_txid)
+    if index < 0:
+        UNLOCK_DB()
+        cleanup_and_exit (conn, 'Internal error. Auditor\'s txid does not exist in the database')
+        return
+    index_to_be_audited = get_txid_index_in_db(txid_of_tracefile)
+    if index_to_be_audited < 0:
+        UNLOCK_DB()
+        cleanup_and_exit (conn, 'Internal error. The txid which is supposed to be audited by the Auditor does not exist in the database')
+        return
+    is_logged_in = database[index]['is_logged_in_now']
+    if is_logged_in:
+        UNLOCK_DB()
+        cleanup_and_exit (conn, 'Auditor\'s txid is already logged in')
+        return
+    #else:
+    database[index]['is_logged_in_now'] = True
+    time_finished= database[index]['finished_banking']
+    prev_login_time = database[index]['last_login_time']
+    database[index]['last_login_time'] = int(time.time())
+    port = database[index]['port']
+    UNLOCK_DB()
+    
+    db_str = get_database_as_a_string(txid_of_tracefile)
+    conn.send('database ' + db_str)
+    #allow stub.py to process socket data before sending next messages
+    time.sleep(3)
+    
+    if time_finished != 0:
+     #the auditor already received the tracefile before. There's nothing more for him to do here.
+        cleanup_and_exit(conn, 'Auditor has already received the tracefile', invoking_txid)
+        return
+    #else prepare to serve the tracefile
+    #don't complicate the code by checking for a stale session like we do in user_thread because if the auditor lost connection
+    #while trying to fetch the tarball, he can simply wait for 1 minute and try again
+    #The oracle will automatically terminate the auditor's ssh sessions after 1 minute
+    if int(time.time()) - prev_login_time > 60 :
+        #this is either auditor's very first login or a non-first login and there was a failure to get the tracefile
+        #on the previous attempt (timeout of 60 secs expired)
+        #Generate a new forwarding port and tell the auditor to reconnect to this new port
+        newport = get_new_port()
+        conn.send('Please reconnect and use the following port for forwarding: '+str(newport))
+        #wait for an ACK and disconnect
+        rv = receive_ACK(conn)
+        if rv != 'success':
+            #the user didn't send back an ACK, assume there was a network problem and release the port
+            release_port(newport)
+            cleanup_and_exit(conn, rv, invoking_txid)
+            return
+        #else ACK received  
+        rv = update_authkeysfile_with_port(invoking_txid, newport)
+        if rv != 'success':
+            release_port(newport)
+            cleanup_and_exit(conn, rv, invoking_txid)
+            return
+        LOCK_DB()
+        index = get_txid_index_in_db(invoking_txid)
+        if index < 0:
+            UNLOCK_DB()
+            cleanup_and_exit(conn, 'Transaction ID not found in database')
+            return
+        #else txid index found
+        database[index]['port'] = newport
+        UNLOCK_DB()
+        cleanup_and_exit(conn, 'Authkeys file entry successfully changed', invoking_txid)
+        return
+    
+    #else if less than 1 minutes elapsed since last login (when the auditor received the forwarding port)
+    #serve the tracefile for 60 seconds
+    print ('Starting mini http server to serve the tracefile for ' + txid_of_tracefile)
+    try:
+        #serve files relative to root dir
+        os.chdir(installdir)
+        httpd = StoppableHttpServer(('127.0.0.1', port), HandlerClass)
+        httpd.arg_in = txid_of_tracefile
+    except Exception, e:
+        release_port(newport)
+        cleanup_and_exit(conn, 'Http error occured', invoking_txid)
+        return
+    starttime = time.time()
+    while not httpd.stop:
+            httpd.handle_request()
+            #we get here when timeout=1 triggers
+            if time.time() - starttime > 60:
+                release_port(newport)
+                cleanup_and_exit (conn, 'Tarball not requested in 1 min', invoking_txid)
+                return
+    #we get here when tarball has been successfully fetched.
+    #Receive ACK and change the tracefile owner's data and remove the tracefile
+    release_port(newport)
+    rv = receive_ACK(conn)
+    if rv != 'success':
+        #the user didn't send back an ACK, assume there was a network problem
+        cleanup_and_exit(conn, rv, invoking_txid)
+        return
+    LOCK_DB()
+    index = get_txid_index_in_db(txid_of_tracefile)
+    if index < 0:
+        UNLOCK_DB()
+        cleanup_and_exit (conn, 'tracefile\'s txid does not exist even though it existed just a minute ago', invoking_txid)
+        return
+    database[index]['finished_banking'] = int(time.time())
+    UNLOCK_DB()
+    os.remove(os.path.join(stcppipe_logdir, txid_of_tracefile+'.tar'))
+    cleanup_and_exit(conn, 'OK', invoking_txid)
+    return
+
 
 def escrow_thread(conn, sshd_ppid):
     global is_escrow_registered
     global is_escrow_logged_in
-    global escrow_host
-    global escrow_port
     global escrow_last_sshd_ppid
     
     if is_escrow_logged_in:
@@ -430,10 +637,9 @@ def escrow_thread(conn, sshd_ppid):
         try:
             os.kill(escrow_last_sshd_ppid, signal.SIGTERM)
             #if we get here, there was no exception, meaning that escrow was indeed still logged in
-            print('Escrow had an active session which was terminated')
             conn.send('Escrow had an active session which was terminated')            
         except OSError:
-            #the PID was not found, i.e. a stale session detected. Leave the logged_in flag and move on
+            #the PID was not found, i.e. no stale session detected. Leave the logged_in flag and move on
             pass     
     
     is_escrow_logged_in = True
@@ -442,8 +648,7 @@ def escrow_thread(conn, sshd_ppid):
     
     while 1:
         #escrow isn't allowed to make more than one request per minute. Anti DOS measure.
-        if TESTING or ALPHA_TESTING: time.sleep(1)
-        else: time.sleep(60)
+        time.sleep(1 if TESTING or ALPHA_TESTING else 60)
         try:
             args = conn.recv(1024)
         except:
@@ -451,196 +656,133 @@ def escrow_thread(conn, sshd_ppid):
             continue
         arglist = args.split()
         if len(arglist) < 2:
-            print('Session finished. Too few arguments')
-            conn.send('Session finished. Too few arguments')
-            time.sleep(1)
-            conn.close()
-            is_escrow_logged_in = False
+            cleanup_and_exit(conn, 'Too few arguments', 'escrow-id')
             return
         magic, cmd, paralist = arglist[0], arglist[1], arglist[2:]
         if not magic == 'escrow-id-cmd':
-            print('Session finished. Internal error. Wrong magic string')
-            conn.send('Session finished. Internal error. Wrong magic string')
-            time.sleep(1)
-            conn.close()
-            is_escrow_logged_in = False
+            cleanup_and_exit(conn, 'Internal error. Wrong magic string', 'escrow-id')
             return
         if not is_escrow_registered and not cmd == 'register_escrow':
-            print('Session finished. You must register escrow first ')
-            conn.send('Session finished. You must register escrow first ')
-            time.sleep(1)
-            conn.close()
-            is_escrow_logged_in = False
+            cleanup_and_exit(conn, 'You must register escrow first', 'escrow-id')
             return
         if cmd == 'register_escrow':
             #This is the very first command that escrow must send after installing this oracle
-            #format: register_escrow pubkey escrow_host escrow_port
-            if len(paralist) != 3:
-                print('Session finished. Invalid amount of parameters')
-                conn.send('Session finished. Invalid amount of parameters')
-                time.sleep(1)
-                conn.close()
-                is_escrow_logged_in = False
+            #format: register_escrow pubkey
+            if len(paralist) != 1:
+                cleanup_and_exit(conn, 'Invalid amount of parameters', 'escrow-id')
                 return
             if is_escrow_registered:
-                print('Session finished. Escrow already registered')
-                conn.send ('Session finished. Escrow already registered')
-                time.sleep(1)
-                conn.close()
-                is_escrow_logged_in = False
+                cleanup_and_exit(conn, 'Escrow already registered', 'escrow-id')
                 return
-            pubkey, host_ip, port = paralist
-            
-            input_error = False
-            if (len(pubkey) > 1000) or (len(port)>5) or not port.isdigit() or (len(host_ip) > 15):
-                input_error = True
-            if not input_error:
-                try:
-                    port_int = int(port)
-                    if port_int > 65536: input_error=True
-                except:
-                    input_error = True
-            
-            if input_error:
-                print('Session finished. Faulty data for registering escrow')
-                conn.send('Session finished. Faulty data for registering escrow')
-                time.sleep(1)
-                conn.close()
-                is_escrow_logged_in = False
+            pubkey  = paralist[0]
+            if (len(pubkey) > 1000):
+                cleanup_and_exit(conn, 'Faulty data for registering escrow', 'escrow-id')
                 return
             
             akeys_file = open(authorized_keys, 'w')
             fcntl.flock(akeys_file, fcntl.LOCK_EX)            
-            akeys_file.write('no-pty,no-agent-forwarding,no-user-rc,no-X11-forwarding,no-port-forwarding,command="/usr/bin/python '+os.path.join(installdir, 'stub.py') + ' escrow-id" ssh-rsa '+pubkey+'\n')
+            akeys_file.write('no-pty,no-agent-forwarding,no-user-rc,no-X11-forwarding,permitopen="localhost:'+str(escrow_magic_port)+'",command="/usr/bin/python '+os.path.join(installdir, 'stub.py') + ' escrow-id login" ssh-rsa '+pubkey+'\n')
             fcntl.flock(akeys_file, fcntl.LOCK_UN)
             akeys_file.close()
             
-            escrow_host = host_ip
-            escrow_port = port
             is_escrow_registered = True
-            print('Escrow successfully registered')
             conn.send('Escrow successfully registered')
             continue    
         
+        
         if cmd == 'add_pubkey':
-            #format: add_pubkey tx-id pubkey forwarding_port
-            if len(paralist) != 3:
-                print('Session finished. Invalid amount of parameters')
-                conn.send('Session finished. Invalid amount of parameters')
-                time.sleep(1)
-                conn.close()
-                is_escrow_logged_in = False
+            #format: add_pubkey pubkey tx-id 
+            if len(paralist) != 2:
+                cleanup_and_exit(conn, 'Invalid amount of parameters', 'escrow-id')
                 return
-            txid, pubkey, port = paralist
-            input_error = False
-            if (len(txid) != 9) or (len(pubkey) > 1000) or not port.isdigit():
-                input_error = True
-            if not input_error:
-                try:
-                    port_int = int(port)
-                    if port_int > 65536: input_error=True
-                except:
-                    input_error = True
-                    
-            if input_error:
-                print('Session finished. Faulty data for adding a pubkey')
-                conn.send('Session finished. Faulty data for adding a pubkey')
-                time.sleep(1)
-                conn.close()
-                is_escrow_logged_in = False
+            pubkey, txid = paralist
+            if (len(txid) != 9) or (len(pubkey) > 1000) :
+                cleanup_and_exit(conn, 'Faulty data for adding a pubkey', 'escrow-id')
                 return
-            retval = escrow_add_pubkey(txid, pubkey, port)
-            if retval[0] == -1:
-                conn.send('Session finished. '+retval[1])
-                time.sleep(1)
-                conn.close()
-                is_escrow_logged_in = False
+            retval = escrow_add_pubkey(txid, pubkey)
+            if retval != 'success':
+                cleanup_and_exit(conn, retval, 'escrow-id')
                 return
             else:
-                print('Public key successfully added to database')
                 conn.send('Public key successfully added to database')
                 continue
         
         if cmd == 'add_auditor':
-          #OT feature. Add an auditor who can get a status of only one specific transaction
-            #format: add_auditor auditor_pubkey txid_to_be_audited
-            if len(paralist) != 2:
-                print('Session finished. Invalid amount of parameters')
-                conn.send('Session finished. Invalid amount of parameters')
-                time.sleep(1)
-                conn.close()
-                is_escrow_logged_in = False
+            #OT feature. Add an auditor who can get a status of only one specific transaction and fetch its tracefile
+            #format: add_auditor auditor_pubkey tx-id txid_to_be_audited
+            if len(paralist) != 3:
+                cleanup_and_exit(conn, 'Invalid amount of parameters', 'escrow-id')
                 return
-            auditorPubkey, txidToBeAudited = paralist
-            if len(auditorPubkey) > 1000 or len(txidToBeAudited) > 9:
-                print('Session finished. Faulty data for adding an auditor pubkey')
-                conn.send('Session finished. Faulty data for adding an auditor pubkey')
-                time.sleep(1)
-                conn.close()
-                is_escrow_logged_in = False
+            auditorPubkey, txid, txidToBeAudited = paralist
+            if len(auditorPubkey) > 1000 or len(txidToBeAudited) > 9 or len(txid) > 9:
+                cleanup_and_exit(conn, 'Faulty data for adding an auditor pubkey', 'escrow-id')
                 return
-            retval = escrow_add_pubkey(txid, pubkey, isAuditor=True)
-            if retval[0] == -1:
-                conn.send('Session finished. '+retval[1])
-                time.sleep(1)
-                conn.close()
-                is_escrow_logged_in = False
+            retval = escrow_add_auditor(txid, auditorPubkey, txidToBeAudited)
+            if retval != 'success':
+                cleanup_and_exit(conn, retval, 'escrow-id')
                 return
             else:
-                print('Auditor\'s public key successfully added to database')
                 conn.send('Auditor\'s public key successfully added to database')
                 continue
+                 
                        
         if cmd == 'get_tarball':
             #format: get_tarball txid
             if len(paralist) != 1:
-                print('Session finished. Invalid amount of parameters')
-                conn.send('Session finished. Invalid amount of parameters')
-                time.sleep(1)
-                conn.close()
-                is_escrow_logged_in = False
+                cleanup_and_exit(conn, 'Invalid amount of parameters', 'escrow-id')
                 return
             txid = paralist[0]
-            retval = escrow_get_tarball(txid)
-            if retval[0] == -1:
-                print('Session finished. '+retval[1])
-                conn.send('Session finished. '+retval[1])
-                time.sleep(1)
-                conn.close()
-                is_escrow_logged_in = False
+            rv = check_tarball_availability(txid)
+            if rv != 'available':
+                cleanup_and_exit(conn, rv, 'escrow-id')
                 return
-            else:
-                print('Tarball successfully sent to escrow host')
-                conn.send('Tarball successfully sent to escrow host')
-                continue
-        
+            
+            conn.send ('Starting mini http server. I will not accept any commands for 1 minute or until the tarball is fetched')
+            try:
+                #serve files relative to root dir
+                os.chdir(installdir)
+                httpd = StoppableHttpServer(('127.0.0.1', escrow_magic_port), HandlerClass)
+                httpd.arg_in = txid
+            except Exception, e:
+                cleanup_and_exit(conn, 'Error starting mini http server', 'escrow-id')
+                return
+            starttime = time.time()
+            while not httpd.stop:
+                httpd.handle_request()
+                #we get here when timeout=1 triggers
+                if time.time() - starttime > 60:
+                    cleanup_and_exit(conn, 'Tarball not requested in 1 min', 'escrow-id')
+                    return
+            #we get here after the tracefile was successfully sent
+            #change the tracefile owner's data and remove the tracefile
+            LOCK_DB()
+            index = get_txid_index_in_db(txid)
+            if index < 0:
+                UNLOCK_DB()
+                cleanup_and_exit (conn, 'tracefile\'s txid does not exist even though it existed just a minute ago', 'escrow-id')
+                return
+            database[index]['escrow_fetched_tarball'] = int(time.time())
+            UNLOCK_DB()
+            os.remove(os.path.join(stcppipe_logdir, txid+'.tar'))
+            conn.send('Tarball has been fetched, accepting commands now')
+            continue
+               
+                
         if cmd == 'get_database':
             if len(paralist) != 0:
-                print('Session finished. Invalid amount of parameters')
-                conn.send('Session finished. Invalid amount of parameters')
-                time.sleep(1)
-                conn.close()
-                is_escrow_logged_in = False
+                cleanup_and_exit(conn, 'Invalid amount of parameters', 'escrow-id')
                 return
             db_str = get_database_as_a_string("escrow-id")
-            print 'Database sent to escrow' + db_str
             conn.send('database ' + db_str)
             continue
         
+        
         if cmd == 'exit':
-            is_escrow_logged_in = False
-            print('Session finished. Escrow initiated disconnect')
-            conn.send('Session finished. Escrow initiated disconnect')
-            time.sleep(1)
-            conn.close()
+            cleanup_and_exit(conn, 'Escrow initiated disconnect', 'escrow-id')
             return
                    
         else:
-            print('Session finished. Unrecognized command')
-            conn.send('Session finished. Unrecognized command')
-            time.sleep(1)
-            conn.close()
-            is_escrow_logged_in = False
+            cleanup_and_exit(conn, 'Unrecognized command', 'escrow-id')
             return
 
 #remove txid record from authorizedkeys file
@@ -671,12 +813,18 @@ def ban_user(txid):
     fcntl.flock(fd_read, fcntl.LOCK_UN)
     fd_read.close()
     
-    #NB escrow is never in the database
+    #NB escrow is never in the database, so we never ban him
     if txid != 'escrow-id':
-        if get_txid_index_in_db(txid, ban=True) == -1:
-            print 'Internal error. Could not find txid in database'
+        LOCK_DB()
+        index = get_txid_index_in_db(txid)
+        if index < 0:
+            UNLOCK_DB()
+            print ('Internal error. txid to be banned doesn\'t exist in database')
             return
-    
+        #else if txid exists
+        database[index]['finished_banking'] = -1
+        UNLOCK_DB()
+        
 
                 
 
@@ -705,6 +853,7 @@ if __name__ == "__main__":
             #timeout triggered, sleep so that (when debugging) the Ctrl+C could stop the script
             time.sleep(0.2)
         except:
+            #Ctrl+C has been pressed
             exit(0)
         try:
             conn, addr = s.accept()
@@ -712,41 +861,50 @@ if __name__ == "__main__":
             continue
         args = conn.recv(1024)
         arglist = args.split()
-        if len(arglist) < 2 or len(arglist) > 3:
-            print('Session finished. Internal error. Did not receive either 2 or 3 arguments as expected')
-            conn.send('Session finished. Internal error. Did not receive either 2 or 3 arguments as expected')
-            time.sleep(1)
-            conn.close()
+        if len(arglist) < 3:
+            cleanup_and_exit(conn, 'Internal error. Did not receive at least 3 arguments')
             continue
-        
-        if len(arglist) == 3:
-            #OpenTransaction's feature. auditor's connection. Return just one DB entry
-            txid, ppid, auditor_string = arglist
-            if auditor_string != 'auditor':
-                print('Session finished. Internal error. Expected the string auditor')
-                conn.send('Session finished. Internal error. Expected the string auditor')
-                time.sleep(1)
-                conn.close()
+        # parent PID (PID of sshd fork) is passed into a thread, so that when the thread terminates, we could
+        #kill the PPID and prevent any possible memory leaks
+        ppid = arglist.pop(-1)
+        action = arglist[1]
+             
+                
+        if action == 'login': 
+            if len(arglist) != 2:
+                cleanup_and_exit(conn, 'Internal error. 2 arguments expected for  \'login\' ')
                 continue
-            db_str = get_database_as_a_string(txid)
-            conn.send('database ' + db_str)
-            print 'Database entry sent to auditor'
-            #allow stub.py to process socket data before sending the "finished" message
-            time.sleep(3)
-            cleanup_and_exit(conn, msg='Sent database to auditor')
-            return             
-        #else            
-        arg1, arg2 = arglist
-        if arg1 == 'escrow-id':
-            thread = threading.Thread(target= escrow_thread, args=(conn, arg2))
+            txid_to_login = arglist[0]
+            if txid_to_login == 'escrow-id':
+                thread = threading.Thread(target= escrow_thread, args=(conn, ppid))
+                thread.daemon = True
+                thread.start()
+                continue
+            else:
+                thread = threading.Thread(target= user_thread, args=(conn, txid_to_login, ppid))
+                thread.daemon = True
+                thread.start()
+                continue
+            
+            
+        elif action == 'audit':
+            #OpenTransaction's feature. Auditor's connection. Return just one DB entry
+            #and start an http  server to serve the tracefile
+            if len(arglist) != 3:
+                cleanup_and_exit(conn, 'Internal error. 3 arguments expected for  \'audit\' ')
+                continue
+            invoking_txid, txid_to_audit = arglist[0], arglist[2]
+            thread = threading.Thread(target= auditor_thread, args=(conn, invoking_txid, txid_to_fetch, ppid))
             thread.daemon = True
             thread.start()
-        elif arg1 == 'ban':
-            ban_user(arg2)
-        else:
-            #regular user's connection arg1 contains txid, arg2 contains forked sshd's process's ID (to kill it from within the thread)
-            thread = threading.Thread(target= thread_handle_txid, args=(conn, arg1, arg2))
-            thread.daemon = True
-            thread.start()
+            continue
+            
+                                    
+        elif action == 'ban':
+            if len(arglist) != 2:
+                cleanup_and_exit(conn, 'Internal error. 2 arguments expected for  \'ban\' ')
+                continue
+            ban_user(arglist[2])
+            continue
 
             
