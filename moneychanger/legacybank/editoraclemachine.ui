@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>775</width>
-    <height>557</height>
+    <width>821</width>
+    <height>614</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -16,8 +16,8 @@
   <widget class="QToolButton" name="toolButtonDontSave">
    <property name="geometry">
     <rect>
-     <x>590</x>
-     <y>490</y>
+     <x>630</x>
+     <y>560</y>
      <width>181</width>
      <height>41</height>
     </rect>
@@ -34,7 +34,7 @@ saving changes</string>
    <property name="geometry">
     <rect>
      <x>400</x>
-     <y>490</y>
+     <y>560</y>
      <width>121</width>
      <height>41</height>
     </rect>
@@ -50,7 +50,7 @@ and close</string>
      <x>10</x>
      <y>10</y>
      <width>761</width>
-     <height>371</height>
+     <height>381</height>
     </rect>
    </property>
    <layout class="QVBoxLayout" name="verticalLayoutRoot">
@@ -139,41 +139,59 @@ and close</string>
     </item>
    </layout>
   </widget>
-  <widget class="QWidget" name="horizontalLayoutWidget">
+  <widget class="QWidget" name="verticalLayoutWidget">
    <property name="geometry">
     <rect>
      <x>10</x>
      <y>400</y>
      <width>761</width>
-     <height>51</height>
+     <height>149</height>
     </rect>
    </property>
-   <layout class="QHBoxLayout" name="horizontalLayout">
+   <layout class="QVBoxLayout" name="verticalLayout_8">
     <item>
-     <layout class="QVBoxLayout" name="verticalLayout_7">
+     <layout class="QHBoxLayout" name="horizontalLayout">
       <item>
-       <widget class="QLabel" name="label_7">
-        <property name="text">
-         <string>Oracle machine DNS</string>
-        </property>
-       </widget>
+       <layout class="QVBoxLayout" name="verticalLayout_7">
+        <item>
+         <widget class="QLabel" name="label_7">
+          <property name="text">
+           <string>Oracle machine DNS</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLineEdit" name="lineEditDNSName"/>
+        </item>
+       </layout>
       </item>
       <item>
-       <widget class="QLineEdit" name="lineEditDNSName"/>
+       <layout class="QVBoxLayout" name="verticalLayout_6">
+        <item>
+         <widget class="QLabel" name="label_6">
+          <property name="text">
+           <string>Oracle Amazon EC2 public snapshot ID</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLineEdit" name="lineEditSnapshotID"/>
+        </item>
+       </layout>
       </item>
      </layout>
     </item>
     <item>
-     <layout class="QVBoxLayout" name="verticalLayout_6">
+     <layout class="QVBoxLayout" name="verticalLayout_10">
       <item>
-       <widget class="QLabel" name="label_6">
+       <widget class="QLabel" name="label_8">
         <property name="text">
-         <string>Oracle Amazon EC2 public snapshot ID</string>
+         <string>Oracle machine operator private key</string>
         </property>
        </widget>
       </item>
       <item>
-       <widget class="QLineEdit" name="lineEditSnapshotID"/>
+       <widget class="QPlainTextEdit" name="plainTextEdit"/>
       </item>
      </layout>
     </item>

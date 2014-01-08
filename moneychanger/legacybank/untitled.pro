@@ -32,7 +32,9 @@ FORMS    += mainwindow.ui \
     editoraclemachine.ui
 
 OTHER_FILES += \
-    config.xml
+    config.xml \
+    run.txt \
+    statuses.txt
 
 unix: CONFIG += link_pkgconfig
 unix: PKGCONFIG += opentxs

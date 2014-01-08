@@ -48,8 +48,7 @@ public slots:
     void slotQueryOracleMachine();
     void slotReadSSHStderr();
     void slotReadSSHStdout();
-    void onRequestCompleted();
-    void onRequestCompletedError(QNetworkReply::NetworkError);
+    void slotSSHFinished(int);
 
 private:
     Ui::Form *ui;
@@ -60,6 +59,7 @@ private:
     QStandardItemModel *modelKeysets;
     QStandardItemModel *modelOracleMachine;
     QNetworkAccessManager *nam;
+    QString SSHStderr;
     void loadXMLIntoModel();
     void saveXML();
     void waitForTrigger();

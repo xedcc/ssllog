@@ -32,6 +32,7 @@
 #include <QDebug>
 #include <QThread>
 #include "customthread.h"
+#include <QProcess>
 
 using namespace irr; // irrXML is located in the namespace irr::io
 using namespace io;
@@ -112,38 +113,16 @@ Form::Form(QMutex* mutex, QWidget *parent) :
   sshProcess = new QProcess();
   connect(sshProcess, SIGNAL(readyReadStandardError()), this, SLOT(slotReadSSHStderr()));
   connect(sshProcess, SIGNAL(readyReadStandardOutput()), this, SLOT(slotReadSSHStdout()));
-
-  stderr.open ("/tmp/stderr");
-  stdout.open ("/tmp/stdout");
+  connect(sshProcess, SIGNAL(finished(int)), this, SLOT(slotSSHFinished(int)));
 
   loadXMLIntoModel();
-  isTriggered = false;
-  //nam = new QNetworkAccessManager();
-  //connect(nam,SIGNAL(finished(QNetworkReply*)),this,SLOT(slotURLRequestFinished(QNetworkReply*)));
-  //nam->get(QNetworkRequest(QUrl("http://qt-project.org")));
-
-
-  //connect(reply, SIGNAL(finished()),this, SLOT(onRequestCompleted()));
 
   this->mutex = mutex;
   mutex->lock();
   CustomThread* mThread = new CustomThread(mutex);
   mThread->start();
-
-
 }
 
-void Form::waitForTrigger(){
-  while (!isTriggered){
-    sleep(1);
-  }
-
-  nam->get(QNetworkRequest(QUrl("http://ec2.sa-east-1.amazonaws.com/?"
-                                "AWSAccessKeyId=AKIAI3J2VY5V6W3XDV2Q&Action=DescribeInstances&"
-                                "Expires=2015-01-01&SignatureMethod=HmacSHA256&SignatureVersion=2&"
-                                "Version=2013-10-15&Signature=wGzH6YE2JNhlEsbRi8r%2Bu%2FVb4W1s2W6oMETBWBxB5%2BA%3D")));
-
-}
 
 Form::~Form()
 {
@@ -153,17 +132,63 @@ Form::~Form()
 void Form::slotReadSSHStderr(){
   string out;
   out = QString(sshProcess->readAllStandardError()).toStdString();
-  stderr << out;
-  stderr.flush();
+//  qDebug() << "stderr";
+//  qDebug() << out.c_str();
+  SSHStderr.append(out.c_str());
 }
 
 void Form::slotReadSSHStdout(){
   string out;
   out = QString(sshProcess->readAllStandardOutput()).toStdString();
-  stdout << out;
-  stdout.flush();
+  qDebug() << "stdout";
+  qDebug() << out.c_str();
 }
 
+void Form::slotSSHFinished(int exitcode){
+  qDebug() << "from slotSSHFinished";
+  qDebug() << SSHStderr;
+
+  //An example of a db entry (newlines don't exist there, I added them here for formatting):
+
+  //database {'escrow_fetched_tarball': 0, 'added': 1388165153, 'hash': '',
+  //'last_login_time': 0, 'finished_banking': 0, 'is_logged_in_now': False,
+  //'sshd_ppid': 0, 'pubkey': 'AAAAB3NzaC1yc2EAAAADAQABAAABAQDGyGDPY3PYQ3OHctbW
+  //EzpMDrQa29sXouiydQEERLU8zUH8UEByglZs/B9lRTiN9UxjdC21kJu5aWtn0iXB3ehxsvUSkOx
+  //Yku7R7x/N0SZZzKpmkfZCpWmzZh4wGR7VjhSBYbvlARw6vcDLqg+ot4tvg9pGbXdYGOrX07RB3M
+  //xCzOa0r0bK6V1sAUoXs8JgxNDy31syTcPrIkegJp8yHM4s5s4DFQ5yteSnXW15gvIt8+/dqog7l
+  //0UbRc6vbbyKK4Ms2dMCBDIID6VXkDRQtllUdaqKVoTDX+i1dkuMcm+It3+4wAhPwfreYdTwygdN
+  //WS7EQinKq4pGYofKJ3yYp5RX', 'port': 2134, 'txid': '1234-5678'
+
+  //check txid matches
+  //check pubkey matches that in the contract
+  //check if banking is finished
+  //get trace hash
+
+  QRegularExpression re1("'txid': '([\w\W]{9})'");
+  QRegularExpressionMatch match1 = re1.match(SSHStderr);
+  if (match1.hasMatch()) {
+      QString txid = match1.captured(1);
+  }
+
+  QRegularExpression re2("'pubkey': '(.*)'");
+  QRegularExpressionMatch match2 = re2.match(SSHStderr);
+  if (match2.hasMatch()) {
+      QString pubkey = match2.captured(1);
+  }
+
+  QRegularExpression re3("'finished_banking': ([0-9]*)");
+  QRegularExpressionMatch match3 = re3.match(SSHStderr);
+  if (match3.hasMatch()) {
+    QString finishedBanking = match3.captured(1);
+  }
+
+  QRegularExpression re4("'hash': '(\w*)'");
+  QRegularExpressionMatch match4 = re4.match(SSHStderr);
+  if (match4.hasMatch()) {
+    QString hash = match4.captured(1);
+  }
+
+}
 
 
 void CustomThread::run()
@@ -365,43 +390,66 @@ void CustomThread::run()
   if (AccessKeyId != describeVolumesURL.split("/?AWSAccessKeyId=").at(1).split("&").at(0)) return ;
   if (AccessKeyId != getConsoleOutputURL.split("/?AWSAccessKeyId=").at(1).split("&").at(0)) return ;
 
-
+  mutex->unlock();
 }
 
 
 //query all the URLs to make sure that the oracle machine is legit
 //after that perform an ssh query
 
-void Form::slotQueryOracleMachine(){
-
+void Form:: slotQueryOracleMachine(){
   mutex->unlock();
-
-
-  //wait for all URL queries to complete
-  while (true){
-    sleep(1);
+  //the url-querying thread has now locked the mutex
+  if (!mutex->tryLock(30*1000)){
+    //the url querying thread hasn't returned in 30 seconds
+    return;
   }
-
+  //else
 
   //these variables must be sourced from the contract's text
 
+  //key taken from oracle/key2
   QString privateKey = "-----BEGIN RSA PRIVATE KEY-----\n"
-
-      "-----END RSA PRIVATE KEY-----";
+      "MIIEpAIBAAKCAQEAqq2OxCSIwHdyMv+Ac1ZpsJuz0kyNprQEzlFtzkjI+UVSM22W\n"
+      "tKgyKA2JiqSNFZD64YrLRhoc/+CuId9GN2gjpQUWp3xosqS5Zpy8if68jPyjrG49\n"
+      "CfnY9iEmSGVlwmSjIKU/RZNKh5sJSuc1ztqvzCRctJK4/UYfPwNSfAfJhmSuPTl6\n"
+      "5Q+HTn8WKwkju6+383JAxCwItEVAb7H0PN48C2+0ak+C1/8LK4JNaI8TFVSH7mcI\n"
+      "aWUSiHZKkvJF7CFWp1gvUGWLLcIE3Xh1vb5Cn9u7UYlaj9Nmb0QU01MWHuKV2lQU\n"
+      "GkiWchF8X9KXEffHC9GNRQs667QOxycEJVrhEQIDAQABAoIBADRPWTA4WklS0oda\n"
+      "042F8IKWVfigSdHL3qU1Q8gzepUbb+QfNE9ONYEdFQiPAkaX1qyFk2N64WRzAiuT\n"
+      "eLvGiRYshxLyCEyoO8J9SzOoBTXYwHk6mC6UirB03HzXxuZbXbvFqayzReZl1+VD\n"
+      "E7TARZz1kAwv486MTUtMw10MLfGoLbGkjxTkjotEvE3D65YoSFUeVLQymSMIj7uN\n"
+      "SWgxe8Mr9U/Bixy003JtIDh8rwJCTp+NbhFt10nl0Q+PeP8R//l8Nfy5du4QkFCc\n"
+      "/b2tbJMC2w9l1xnbQ2n1vOeWKyVoTczEkdRzV0yZwKiLROzS8IVA3XZCIpvMI9o8\n"
+      "oVh1sqECgYEA1Dglo1sGTobkPdrs0+NzcbUJHDCh6G9fq5j/4HbjCwBJFFsMe5Qd\n"
+      "i24cn4SFusR/HFHak/kahE4u29kEFGL/VAS7pki1nnjnjY0Jt8ls7vzB9jm6vLwV\n"
+      "c+iPXyZ6SmJhyqo85qJIfLzWozWmfz712dGjWVRuaqj9RwytYf6nVc0CgYEAzeOA\n"
+      "4W+8C0gV6wQ5DD4/6cw7FYE4ii+314UjjFl7llWCiZSq6ojIPG3ipoDkkZssIJ7e\n"
+      "GvteMxPMyTmhaMq7gAdscQ6gqQkUgLsK0K5ofogqIkHUS2UicJYJU6XSxVFzUcNy\n"
+      "HqVVN02Skfde7XvH+Emir1MWSigRJekdy/4U9FUCgYA4sMMFL1Sw94HTMD9hnvoA\n"
+      "3w6O9ELcF5xj95wq9zdRggMDqArenEOEMqb8yeb7bHBUPV15d+roewYzfnaDh6qT\n"
+      "ZCxIkFXL/ppEiu+Uo/8wnF6oCuXicw/8BZz/GwVCB6P+ApoANkvM3pkrwjI2/bep\n"
+      "N0I+o7pXTctTBoTuj5td5QKBgQC3F+9gC4Z1nehn9HxrB9y8pLOSXzURpnfeAHdp\n"
+      "c5Y1TdvlT8FjCrrPCoV5vrwFRLJMXBt2cT4HPD9sX4TL9SYjJ/bm37Q+PmXuSOfI\n"
+      "RqGEjMCzcElDty+WYcbvjVLPyKw99QpCeJM8uA51IkBX/zEI+yrisYfr8I+3YATw\n"
+      "iQbHdQKBgQCKOkntX+l1dNyh8ZA9MWJdTBZC7aJksLZsRuS4EVppqMUXEwcnnHHo\n"
+      "9Npki5+fiC48ggkbavDM552DfP6A5WSUBN8XHg5QghFA0Ao+aHZLU03AOtCALTAA\n"
+      "Ywrw1Woqe29mkx5Xg5KaeBZ9QVh9R8fH6rQyAbFWYizu8V+8hdrvtA==\n"
+      "-----END RSA PRIVATE KEY-----\n";
   ofstream privkeyFile;
   privkeyFile.open("/tmp/priv.key");
   privkeyFile << privateKey.toStdString();
   privkeyFile.close();
+  QProcess::execute("chmod 0600 /tmp/priv.key");
 
   //wrte the privkey to a file;
-  QString DNSName = "ec2-54-207-26-20.sa-east-1.compute.amazonaws.com";
-  QString getUserURL = "";
+  QString DNSName = "ec2-54-207-4-157.sa-east-1.compute.amazonaws.com";
 
   //connect to SSH/plink
-
   QString program = "/usr/bin/ssh";
   QStringList arguments;
-  string concat = "ubuntu@" + DNSName.toStdString();
+  //string concat = "ubuntu@" + DNSName.toStdString();
+  string concat = "localhost";
   QString qconcat(concat.c_str());
   arguments << "-i" << "/tmp/priv.key" << "-oIdentitiesOnly=yes" << qconcat;
 
